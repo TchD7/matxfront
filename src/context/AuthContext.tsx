@@ -1,6 +1,8 @@
 import { createContext, useState, useEffect, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import type { ReactNode } from 'react';
-import { getAccessToken } from '../api/apiClient';
+import { getAccessToken, clearTokens } from '../api/apiClient';
+import axios from 'axios';
 
 interface AuthContextType {
   user: any | null;
@@ -22,42 +24,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const initializeAuth = async () => {
-      try {
-        // Vérifier si un token d'accès est disponible
-        const accessToken = getAccessToken();
-        const storedUser = localStorage.getItem('user');
+ useEffect(() => {
+  const initializeAuth = async () => {
+    try {
+      const accessToken = getAccessToken();
+      const storedUser = localStorage.getItem('user');
 
-        if (accessToken && storedUser) {
-          try {
-            setUser(JSON.parse(storedUser));
-          } catch (e) {
-            console.warn('⚠️ Utilisateur stocké invalide, nettoyage');
-            localStorage.removeItem('user');
+      if (accessToken && storedUser) {
+        // Charger d'abord depuis le localStorage pour éviter le flicker
+        setUser(JSON.parse(storedUser));
+        
+        // Puis actualiser les données du serveur pour s'assurer que les permissions sont à jour
+        try {
+          const baseURL = localStorage.getItem('tenant_api_url') || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+          const response = await axios.get(`${baseURL}/api/v1/customers/users/me/`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+          
+          const userData = response.data.data || response.data;
+          if (userData) {
+            // Mettre à jour avec les données fraîches du serveur
+            localStorage.setItem('user', JSON.stringify(userData));
+            setUser(userData);
           }
+        } catch (err) {
+          // Si la récupération du serveur échoue, garder les données du localStorage
+          // (l'utilisateur peut toujours travailler avec les données en cache)
         }
-      } catch (err) {
-        console.error('❌ Erreur initialisation auth:', err);
-      } finally {
-        setIsLoading(false);
+      } else {
+        setUser(null);
       }
-    };
+    } catch (err) {
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    initializeAuth();
-  }, []);
+  initializeAuth();
+}, []);
 
   const login = (userData: any, _token?: string) => {
-    // Stocker l'utilisateur dans le contexte ET localStorage
-    // Les tokens sont déjà sauvegardés par setTokens() dans apiClient
-    localStorage.setItem('user', JSON.stringify(userData));
-    setUser(userData);
+    if (!userData) {
+      throw new Error('userData manquante pour le login');
+    }
+
+    try {
+      const userJson = JSON.stringify(userData);
+      localStorage.setItem('user', userJson);
+    } catch (e) {
+      throw new Error('Impossible de sérialiser les données utilisateur');
+    }
+    
+    flushSync(() => {
+      setUser(userData);
+    });
   };
 
   const logout = () => {
-    // Nettoyer les données utilisateur
-    // Les tokens sont gérés par l'apiClient
+    clearTokens();
     localStorage.removeItem('user');
+    localStorage.removeItem('jwt_access_token');
+    localStorage.removeItem('jwt_refresh_token');
+    localStorage.removeItem('tenant_api_url');
     setUser(null);
   };
 
@@ -71,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       isAuthenticated,
     }),
-    [user, isLoading]
+    [user, isLoading, isAuthenticated]
   );
 
   return (

@@ -15,6 +15,27 @@ import {
 import api from '../../api/apiClient';
 import MatxLogo from '../../assets/matx-logo.svg';
 
+// ============================================================
+// Extraction des messages d'erreur depuis le backend
+// Respecte le contrat API strictement
+// ============================================================
+function extractErrorMessage(error: any): string {
+  const data = error?.response?.data;
+
+  if (!data) return "Erreur serveur";
+
+  // Priorité 1: data.detail (erreur globale)
+  if (data.detail) return data.detail;
+
+  // Priorité 2: premier champ erreur (erreur par champ)
+  const firstKey = Object.keys(data)[0];
+  const firstValue = data[firstKey];
+
+  if (Array.isArray(firstValue)) return firstValue[0];
+
+  return firstValue || "Erreur inconnue";
+}
+
 export default function ResetPasswordToken() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
@@ -25,6 +46,7 @@ export default function ResetPasswordToken() {
   const [verifying, setVerifying] = useState(true);
   const [message, setMessage] = useState('');
   const [tokenValid, setTokenValid] = useState(false);
+  const [clientLogo, setClientLogo] = useState<string>(MatxLogo); // ✅ Ajouter state pour logo client
 
   const bgColor = useColorModeValue('white', 'gray.700');
   const pageBg = useColorModeValue('gray.50', 'gray.800');
@@ -41,12 +63,22 @@ export default function ResetPasswordToken() {
       try {
         // GET pour vérifier si le token existe et n'est pas expiré
         const config: any = { skipAuth: true };
-        await api.get(`/api/v1/customers/auth/accept-invitation/${token}/`, config);
+        const res = await api.get(`/api/v1/customers/auth/accept-invitation/${token}/`, config);
+        
+        // ✅ Extraire le logo du client depuis la réponse
+        const data = res.data.data || res.data;
+        if (data?.client_logo) {
+          setClientLogo(data.client_logo);
+          console.log('🖼️ Logo du client chargé:', data.client_logo);
+        }
+        
         setTokenValid(true);
       } catch (err: any) {
         setTokenValid(false);
-        const serverDetail = err.response?.data?.detail || "Ce lien est invalide ou a expiré.";
-        setMessage(serverDetail);
+        // ✅ Utiliser extractErrorMessage pour respecter le contrat API
+        const errorMsg = extractErrorMessage(err);
+        setMessage(errorMsg);
+        console.error('❌ Erreur lors de la vérification du token:', errorMsg);
       } finally {
         setVerifying(false);
       }
@@ -91,20 +123,14 @@ export default function ResetPasswordToken() {
       // Redirection vers login après succès
       setTimeout(() => navigate('/'), 3000);
     } catch (err: any) {
-      const data = err.response?.data;
-      let finalMessage = 'Une erreur est survenue lors de la mise à jour.';
-
-      if (data) {
-        if (data.detail) {
-          finalMessage = data.detail;
-        } else if (typeof data === 'object') {
-          // Extraction de la première erreur de validation (ex: mot de passe trop simple)
-          const errors = Object.values(data);
-          const firstError = errors[0];
-          finalMessage = Array.isArray(firstError) ? firstError[0] : String(firstError);
-        }
-      }
-      setMessage(finalMessage);
+      console.error('❌ Erreur lors de la mise à jour du mot de passe:', err);
+      
+      // ✅ Utiliser extractErrorMessage pour respecter le contrat API
+      // Cela respecte la priorité: detail > premier champ erreur > fallback
+      const errorMsg = extractErrorMessage(err);
+      
+      setMessage(errorMsg);
+      console.error('💾 Message d\'erreur du backend:', errorMsg);
     } finally {
       setLoading(false);
     }
@@ -126,7 +152,8 @@ export default function ResetPasswordToken() {
     <Center minH="100vh" bg={pageBg} px={4}>
       <Box maxW="400px" w="full" p={8} bg={bgColor} shadow="2xl" borderRadius="2xl">
         <VStack spacing={6}>
-          <Image src={MatxLogo} alt="Matx Logo" htmlWidth="140px" />
+          {/* ✅ Afficher le logo du client au lieu de MatxLogo */}
+          <Image src={clientLogo} alt="Client Logo" htmlWidth="140px" />
           
           <Text fontSize="lg" fontWeight="bold" textAlign="center" color="gray.700">
             {tokenValid ? "Réinitialisation" : "Lien expiré"}

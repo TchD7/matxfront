@@ -12,6 +12,27 @@ import {
 } from '@chakra-ui/react'
 import api from '../../api/apiClient'
 
+// ============================================================
+// Extraction des messages d'erreur depuis le backend
+// Respecte le contrat API strictement
+// ============================================================
+function extractErrorMessage(error: any): string {
+  const data = error?.response?.data;
+
+  if (!data) return "Erreur serveur";
+
+  // Priorité 1: data.detail (erreur globale)
+  if (data.detail) return data.detail;
+
+  // Priorité 2: premier champ erreur (erreur par champ)
+  const firstKey = Object.keys(data)[0];
+  const firstValue = data[firstKey];
+
+  if (Array.isArray(firstValue)) return firstValue[0];
+
+  return firstValue || "Erreur inconnue";
+}
+
 export default function LoginUsername() {
   const navigate = useNavigate()
 
@@ -46,13 +67,14 @@ export default function LoginUsername() {
       navigate(`/login-password?username=${encodeURIComponent(cleanUsername)}`)
 
     } catch (err: any) {
-      if (err.response?.data?.credential?.[0]) {
-        setError(err.response.data.credential[0])
-      } else if (err.response?.status === 429) {
-        setError("Trop de tentatives. Réessayez plus tard.")
-      } else {
-        setError("Utilisateur non trouvé ou non autorisé")
-      }
+      console.error('❌ Erreur lors de la vérification des identifiants:', err);
+      
+      // ✅ Utiliser extractErrorMessage pour respecter le contrat API
+      // Cela respecte la priorité: detail > premier champ erreur > fallback
+      const errorMsg = extractErrorMessage(err);
+      
+      setError(errorMsg);
+      console.error('💾 Message d\'erreur du backend:', errorMsg);
     } finally {
       setLoading(false)
     }

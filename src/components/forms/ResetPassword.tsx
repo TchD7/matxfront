@@ -14,6 +14,27 @@ import {
 import api from '../../api/apiClient';
 import MatxLogo from '../../assets/matx-logo.svg';
 
+// ============================================================
+// Extraction des messages d'erreur depuis le backend
+// Respecte le contrat API strictement
+// ============================================================
+function extractErrorMessage(error: any): string {
+  const data = error?.response?.data;
+
+  if (!data) return "Erreur serveur";
+
+  // Priorité 1: data.detail (erreur globale)
+  if (data.detail) return data.detail;
+
+  // Priorité 2: premier champ erreur (erreur par champ)
+  const firstKey = Object.keys(data)[0];
+  const firstValue = data[firstKey];
+
+  if (Array.isArray(firstValue)) return firstValue[0];
+
+  return firstValue || "Erreur inconnue";
+}
+
 export default function ResetPassword() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -30,6 +51,7 @@ export default function ResetPassword() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [sent, setSent] = useState(false);
+  const [clientLogo, setClientLogo] = useState<string>(MatxLogo); // ✅ State pour logo client
 
   // Guard : redirection si pas de username
   useEffect(() => {
@@ -46,9 +68,16 @@ useEffect(() => {
 
   const checkUserExistence = async () => {
     try {
-      await api.post('/api/v1/customers/users/check-credentials/', {
+      const res = await api.post('/api/v1/customers/users/check-credentials/', {
         credential: username
       });
+      
+      // ✅ Extraire le logo du client depuis la réponse
+      const data = res.data.data || res.data;
+      if (data?.client_logo) {
+        setClientLogo(data.client_logo);
+        console.log('🖼️ Logo du client chargé:', data.client_logo);
+      }
     } catch (err) {
       console.warn("Utilisateur non trouvé ou erreur de tenant.");
     }
@@ -77,18 +106,14 @@ useEffect(() => {
       setSuccess(res.data.detail);
       setSent(true); 
     } catch (err: any) {
-      console.error(err);
+      console.error('❌ Erreur lors de la réinitialisation de mot de passe:', err);
       
-      // Gestion de la 404 ou erreur de validation du Serializer
-      if (err.response?.status === 404) {
-        setError("Le service de réinitialisation est indisponible (Route 404).");
-      } else {
-        setError(
-          err.response?.data?.detail || 
-          err.response?.data?.username?.[0] || // Pour les erreurs de validation serializer
-          "Une erreur est survenue, veuillez réessayer."
-        );
-      }
+      // ✅ Utiliser extractErrorMessage pour respecter le contrat API
+      // Cela respecte la priorité: detail > premier champ erreur > fallback
+      const errorMsg = extractErrorMessage(err);
+      
+      setError(errorMsg);
+      console.error('💾 Message d\'erreur du backend:', errorMsg);
     } finally {
       setLoading(false);
     }
@@ -101,7 +126,8 @@ useEffect(() => {
     <Center minH="100vh" bg={pageBg} px={4}>
       <Box maxW="400px" w="full" p={8} bg={bgColor} shadow="lg" borderRadius="xl">
         <VStack spacing={6}>
-          <Image src={MatxLogo} alt="Matx Logo" htmlWidth="160px" />
+          {/* ✅ Afficher le logo du client au lieu de MatxLogo */}
+          <Image src={clientLogo} alt="Client Logo" htmlWidth="160px" />
           
           <HStack spacing={2} justify="center" bg="gray.50" py={2} px={4} borderRadius="full">
             <HiOutlineUserCircle size="20px" color="gray" />

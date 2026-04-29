@@ -44,14 +44,28 @@ const saveTokens = (access: string | null, refresh: string | null) => {
 /**
  * Supprime tous les tokens du localStorage
  */
-const clearTokens = () => {
+export const clearTokens = () => {
   localStorage.removeItem(TOKEN_KEYS.ACCESS);
   localStorage.removeItem(TOKEN_KEYS.REFRESH);
 };
 
 // ================= API CLIENT SETUP =================
 const getInitialBaseURL = () => {
-  return localStorage.getItem(TOKEN_KEYS.TENANT_URL) || API_CENTRAL;
+  const tenantUrl = localStorage.getItem(TOKEN_KEYS.TENANT_URL);
+
+  if (!tenantUrl) {
+    return API_CENTRAL;
+  }
+
+  try {
+    const url = new URL(tenantUrl);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    localStorage.removeItem(TOKEN_KEYS.TENANT_URL);
+
+    
+    return API_CENTRAL;
+  }
 };
 
 const api: AxiosInstance = axios.create({
@@ -129,16 +143,45 @@ class TokenManager {
 const tokenManager = new TokenManager();
 
 // ================= TENANT URL MANAGEMENT =================
-export const updateApiBaseURL = (tenantDomain: string) => {
-  if (!tenantDomain) return;
+/**
+ * Met à jour l'URL de base de l'API vers le backend tenant
+ * @param tenantUrl URL ou domaine du backend tenant
+ * Accepte: "snpt.localhost" ou "http://snpt.localhost:8000"
+ */
+export const updateApiBaseURL = (tenantUrl: string) => {
+  if (!tenantUrl) return;
 
-  const protocol = window.location.protocol;
-  const newUrl = tenantDomain.startsWith('http')
-    ? tenantDomain
-    : `${protocol}//${tenantDomain}`;
+  let newUrl: string;
+  
+  try {
+    // ✅ IMPORTANT: Toujours extraire le port du backend INITIAL (API_CENTRAL)
+    // PAS du baseURL courant qui peut avoir été modifié
+    const centralUrl = new URL(API_CENTRAL);
+    const backendPort = centralUrl.port || (centralUrl.protocol === 'https:' ? '443' : '80');
+    const protocol = centralUrl.protocol;
 
-  localStorage.setItem(TOKEN_KEYS.TENANT_URL, newUrl);
-  api.defaults.baseURL = newUrl;
+    if (tenantUrl.startsWith('http')) {
+      // URL complète, utiliser telle quelle
+      newUrl = tenantUrl;
+    } else {
+      // Juste un domaine, reconstruire avec protocole et port du backend
+      newUrl = `${protocol}//${tenantUrl}:${backendPort}`;
+    }
+
+    console.log('🔄 updateApiBaseURL:', {
+      tenantUrl,
+      backendPort,
+      protocol,
+      newUrl
+    });
+
+    localStorage.setItem(TOKEN_KEYS.TENANT_URL, newUrl);
+    api.defaults.baseURL = newUrl;
+    
+    console.log('✅ API baseURL mis à jour vers:', api.defaults.baseURL);
+  } catch (error) {
+    console.error('❌ Erreur dans updateApiBaseURL:', error);
+  }
 };
 
 // ================= REQUEST INTERCEPTOR =================
@@ -211,14 +254,14 @@ api.interceptors.response.use(
       try {
         const refreshToken = tokenManager.getRefreshToken();
         
-        
+        // ✅ Construire l'URL proprement (REFRESH_URL commence par "/")
+        const refreshUrl = `${api.defaults.baseURL}${REFRESH_URL}`;
+        console.log('🔄 Tentative de refresh à:', refreshUrl);
         
         const { data } = await axios.post(
-          `${api.defaults.baseURL}/${REFRESH_URL}`, 
+          refreshUrl, 
           { refresh: refreshToken },
           {
-            // On ajoute un flag pour que l'intercepteur sache qu'il ne doit pas 
-            // traiter cette requête s'il y a une erreur 401 (pour éviter la boucle infinie)
             headers: { 'Content-Type': 'application/json' },
             _retry: true 
           }

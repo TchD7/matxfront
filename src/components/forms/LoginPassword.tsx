@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { HiOutlineUserCircle } from "react-icons/hi2";
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
@@ -25,6 +25,27 @@ import api, { setTokens, updateApiBaseURL } from '../../api/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import MatxLogo from '../../assets/matx-logo.svg';
 
+// ============================================================
+// Extraction des messages d'erreur depuis le backend
+// Respecte le contrat API strictement
+// ============================================================
+function extractErrorMessage(error: any): string {
+  const data = error?.response?.data;
+
+  if (!data) return "Erreur serveur";
+
+  // Priorité 1: data.detail (erreur globale)
+  if (data.detail) return data.detail;
+
+  // Priorité 2: premier champ erreur (erreur par champ)
+  const firstKey = Object.keys(data)[0];
+  const firstValue = data[firstKey];
+
+  if (Array.isArray(firstValue)) return firstValue[0];
+
+  return firstValue || "Erreur inconnue";
+}
+
 export default function LoginPassword() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,10 +62,10 @@ export default function LoginPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sessionError, setSessionError] = useState('');
+  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!username) {
-      console.warn('❌ LoginPassword: Pas de username fourni');
       toast({
         title: 'Erreur de session',
         description: 'Veuillez recommencer depuis la page de connexion',
@@ -52,11 +73,17 @@ export default function LoginPassword() {
         duration: 5000,
         isClosable: true,
       });
-      // Rediriger après une courte attente pour que le toast soit visible
       setTimeout(() => {
         navigate('/', { replace: true });
       }, 500);
     }
+    
+    // Cleanup : annuler la redirection programmée si le composant est unmount
+    return () => {
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
+      }
+    };
   }, [username, navigate, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -71,42 +98,38 @@ export default function LoginPassword() {
     setSessionError('');
 
     try {
-      console.log('🔐 Tentative de connexion pour:', username);
-      
-      // 1. Authentification centrale
       const res = await api.post('/api/v1/customers/auth/login/', {
         username,
         password,
+      }, {
+        skipAuth: true,
       });
       
       const data = res.data;
-      console.log('Authentification réussie');
+      const authData = data.data || data;
 
-      // 2. Mise à jour des jetons JWT de manière sécurisée
-      // Access token court terme + refresh token long terme
-      setTokens(data.access, data.refresh || null);
-      login(data.user, data.access);
-      
-      // On switch l'URL d'Axios vers le domaine du client (ex: client1.api.com)
-      if (data.tenant_domain) {
-        console.log('🔄 Mise à jour du domaine tenant:', data.tenant_domain);
-        updateApiBaseURL(data.tenant_domain);
+      if (!authData.access) {
+        throw new Error('Access token manquant dans la réponse du backend');
+      }
+      if (!authData.user) {
+        throw new Error('Données utilisateur manquantes');
       }
 
-      // 3. Établir la session sur le domaine du tenant
-      if (data.tenant_url) {
+      setTokens(authData.access, authData.refresh || null);
+      login(authData.user, authData.access);
+      
+      if (authData.tenant_url) {
+        updateApiBaseURL(authData.tenant_url);
+        
         try {
-          console.log('📡 Établissement de la session sur:', data.tenant_url);
-          await axios.get(`${data.tenant_url}/api/v1/customers/auth/session-establish/`, {
+          await axios.get(`${authData.tenant_url}/api/v1/customers/auth/session-establish/`, {
             headers: {
-              'Authorization': `Bearer ${data.access}` 
+              'Authorization': `Bearer ${authData.access}` 
             },
             withCredentials: true,
             timeout: 5000,
           });
-          console.log('✅ Session établie avec succès');
         } catch (sessionErr: any) {
-          console.error('❌ Erreur lors de l\'établissement de session:', sessionErr);
           const errorMsg = sessionErr?.response?.data?.detail || 
                            sessionErr?.response?.data?.message ||
                            sessionErr?.message ||
@@ -120,48 +143,26 @@ export default function LoginPassword() {
             duration: 5000,
             isClosable: true,
           });
-          // On continue quand même mais on affiche l'erreur
         }
       }
 
-      // 4. Nettoyage et navigation interne
       sessionStorage.removeItem('login_username');
       sessionStorage.removeItem('keep_signed_in');
       
-      console.log('✅ Connexion réussie, redirection vers /dashboard');
       toast({
         title: 'Connexion réussie',
         status: 'success',
         duration: 2000,
         isClosable: true,
       });
-      navigate('/dashboard', { replace: true });
+      
+      navigationTimeoutRef.current = setTimeout(() => {
+        navigate('/dashboard', { replace: true });
+      }, 500);
 
     } catch (err: any) {
-      console.error('❌ Erreur lors de la connexion:', err);
-      
-      let errorMsg = 'Erreur inconnue';
-      
-      if (err.response?.status === 401) {
-        errorMsg = 'Mot de passe incorrect';
-      } else if (err.response?.status === 404) {
-        errorMsg = 'Utilisateur non trouvé';
-      } else if (err.response?.status === 429) {
-        errorMsg = 'Trop de tentatives, réessayez plus tard';
-      } else if (err.response?.data?.detail) {
-        errorMsg = err.response.data.detail;
-      } else if (err.response?.data?.username) {
-        errorMsg = err.response.data.username[0] || 'Erreur d\'authentification';
-      } else if (err.message === 'Network Error') {
-        errorMsg = 'Erreur réseau: Impossible de contacter le serveur';
-      } else if (err.code === 'ECONNABORTED') {
-        errorMsg = 'Timeout: Le serveur met trop longtemps à répondre';
-      } else {
-        errorMsg = err.response?.data?.message || 'Erreur serveur ou domaine introuvable';
-      }
-      
+      const errorMsg = extractErrorMessage(err);
       setError(errorMsg);
-      console.error('💾 Message d\'erreur:', errorMsg);
     } finally {
       setLoading(false);
     }

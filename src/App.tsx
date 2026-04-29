@@ -7,8 +7,21 @@ import ResetPasswordToken from './components/forms/ResetPasswordToken';
 import AcceptInvitation from './pages/AcceptInvitation';
 import InternetDetector from './components/forms/InternetDetector';
 import AuthGuard from './components/AuthGuard';
+import { useEffect } from 'react';
+import { updateApiBaseURL } from './api/apiClient';
 
 function App() {
+  useEffect(() => {
+    const tenant = localStorage.getItem('tenant_api_url');
+
+    if (tenant) {
+      console.log('🏢 Restoration tenant App boot:', tenant);
+      updateApiBaseURL(tenant);
+    } else {
+      console.log('📍 Aucun tenant → backend central');
+    }
+  }, []);
+
   return (
     <Router>
       <InternetDetector />
