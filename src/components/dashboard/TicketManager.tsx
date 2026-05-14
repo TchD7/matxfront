@@ -1,10 +1,10 @@
 import {
     Box, Flex, Text, Input, InputGroup, InputLeftElement,
     Table, Thead, Tbody, Tr, Th, Td, Badge, Spinner, useToast,
-    VStack, Center, Menu, MenuButton, MenuList, MenuItem,
-    IconButton, FormControl, FormLabel, Select, HStack,
+    VStack, Center, HStack,
+    IconButton
 } from '@chakra-ui/react';
-import { SearchIcon, ChevronDownIcon, ViewIcon } from '@chakra-ui/icons';
+import { SearchIcon, ViewIcon } from '@chakra-ui/icons';
 import { useEffect, useState, useCallback } from 'react';
 import api from '../../api/apiClient';
 
@@ -17,17 +17,6 @@ interface Ticket {
     technician_name?: string;
     planned_at?: string;
     is_late?: boolean;
-}
-
-interface Equipment {
-    id: string; // UUID string
-    name: string;
-    code: string;
-}
-
-interface InterventionType {
-    id: number;
-    name: string;
 }
 
 interface TicketManagerProps {

@@ -5,8 +5,8 @@ import {
   useDisclosure, FormControl, FormLabel, Input, VStack, Spinner, Center,
   Text, HStack, useBreakpointValue, AlertDialog, AlertDialogBody,
   AlertDialogFooter, AlertDialogHeader, AlertDialogContent, AlertDialogOverlay,
-  InputGroup, InputLeftElement, Container, Alert, AlertIcon, Divider,
-  Select, Checkbox, FormErrorMessage, ButtonGroup, Flex
+  InputGroup, InputLeftElement, Container,
+  Select, Checkbox, ButtonGroup, Flex
 } from '@chakra-ui/react';
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
@@ -17,7 +17,6 @@ import {
 
 import { jwtDecode } from 'jwt-decode';
 import api, { getAccessToken } from '../../api/apiClient';
-import { useAuth } from '../../hooks/useAuth';
 
 // ============================================================
 // Extraction des messages d'erreur depuis le backend
@@ -63,12 +62,9 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function UserManager({ onUserClick }: { onUserClick: (id: string | number) => void }) {
-  const { user: contextUser } = useAuth();
-
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -128,7 +124,12 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
       setNextCursor(apiData.pagination?.next);
       setPrevCursor(apiData.pagination?.previous);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      toast({
+        title: 'Erreur',
+        description: extractErrorMessage(err),
+        status: 'error',
+        duration: 3000,
+      });
     } finally {
       setLoading(false);
     }

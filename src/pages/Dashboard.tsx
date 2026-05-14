@@ -24,6 +24,7 @@ import UserDetails from '../components/dashboard/UserDetails';
 import TicketManager from '../components/dashboard/TicketManager';
 import TicketModal from '../components/dashboard/TicketModal';
 import DashboardHome from '../components/dashboard/DashboardHome';
+import CockpitManager from '../components/cockpit/CockpitManager';
 
 
 // ================= TYPES =================
@@ -200,6 +201,11 @@ export default function Dashboard() {
 
           {/* VUE : PROFIL PERSONNEL (Réutilise UserDetails sans ID pour le "Me") */}
           {view === 'profile' && <UserDetails onBack={() => setView('home')} />}
+
+          {/* VUE : COCKPIT (Équipements & Interventions) */}
+          {view === 'cockpit' && (
+            <CockpitManager />
+          )}
 
         </Box>
       </Flex>
