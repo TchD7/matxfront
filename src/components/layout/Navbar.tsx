@@ -5,6 +5,7 @@ import {
   IconButton,
   Avatar,
   Text,
+  Button,
   Menu,
   MenuButton,
   MenuList,
@@ -20,6 +21,10 @@ interface NavbarProps {
   onOpenSidebar: () => void;
   onProfileClick: () => void;
   onLogout: () => void;
+  onCreateTicket?: () => void;
+  onViewTickets?: () => void;
+  showCreateTicketButton?: boolean;
+  showViewTicketsButton?: boolean;
 }
 
 export default function Navbar({
@@ -27,6 +32,10 @@ export default function Navbar({
   onOpenSidebar,
   onProfileClick,
   onLogout,
+  onCreateTicket,
+  onViewTickets,
+  showCreateTicketButton = false,
+  showViewTicketsButton = false,
 }: NavbarProps) {
 
   const isMobile = useBreakpointValue({ base: true, md: false });
@@ -78,6 +87,17 @@ export default function Navbar({
 
         {/* RIGHT */}
         <HStack spacing={3} align="center">
+          {showViewTicketsButton && onViewTickets && (
+            <Button size="sm" variant="ghost" onClick={onViewTickets}>
+              Voir tous les tickets
+            </Button>
+          )}
+
+          {showCreateTicketButton && onCreateTicket && (
+            <Button size="sm" colorScheme="purple" onClick={onCreateTicket}>
+              Nouvelle intervention
+            </Button>
+          )}
 
           {/* USER MENU */}
           <Menu>

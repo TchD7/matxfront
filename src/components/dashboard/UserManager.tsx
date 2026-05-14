@@ -64,7 +64,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function UserManager({ onUserClick }: { onUserClick: (id: string | number) => void }) {
   const { user: contextUser } = useAuth();
-  
+
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -74,7 +74,7 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
   const [searchTerm, setSearchTerm] = useState('');
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [prevCursor, setPrevCursor] = useState<string | null>(null);
-  const [pageSize, setPageSize] = useState(8);
+  const [pageSize, setPageSize] = useState(50);
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [actionType, setActionType] = useState<'create' | 'edit' | null>(null);
@@ -84,7 +84,7 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
   const { isOpen, onOpen, onClose } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure();
   const { isOpen: isResetOpen, onOpen: onResetOpen, onClose: onResetClose } = useDisclosure();
-  
+
   const cancelRef = useRef(null);
 
   const [formData, setFormData] = useState<FormData>({
@@ -109,11 +109,11 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
   }, []);
 
   const filteredUsers = useMemo(() => {
-    return users.filter((u) => 
-      String(u.id) !== String(currentUserId) && 
-      (u.first_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-       u.last_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-       u.email.toLowerCase().includes(searchTerm.toLowerCase()))
+    return users.filter((u) =>
+      String(u.id) !== String(currentUserId) &&
+      (u.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        u.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        u.email.toLowerCase().includes(searchTerm.toLowerCase()))
     );
   }, [users, currentUserId, searchTerm]);
 
@@ -200,15 +200,15 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
       onResetClose();
     } catch (err) {
       toast({ title: 'Erreur', description: extractErrorMessage(err), status: 'error' });
-    } finally { 
-      setIsSubmitting(false); 
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <Container maxW="full" py={0} px={0} h="full">
       <Flex direction="column" h="calc(100vh - 150px)">
-        
+
         {/* HEADER FIXE */}
         <Box mb={6}>
           <HStack justify="space-between" align="flex-start" mb={4}>
@@ -216,9 +216,9 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
               <Heading size="lg" color="gray.800">Utilisateurs</Heading>
               <Text fontSize="sm" color="gray.500" mt={1}>Gérez vos utilisateurs et leurs rôles</Text>
             </Box>
-            <Button 
-              leftIcon={<RiUserAddLine />} 
-              colorScheme="purple" 
+            <Button
+              leftIcon={<RiUserAddLine />}
+              colorScheme="purple"
               onClick={handleOpenCreate}
               size="md"
               borderRadius="lg"
@@ -229,9 +229,9 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
 
           <InputGroup maxW="400px">
             <InputLeftElement pointerEvents="none"><RiSearchLine color="gray.400" size={18} /></InputLeftElement>
-            <Input 
-              placeholder="Rechercher..." 
-              value={searchInput} 
+            <Input
+              placeholder="Rechercher..."
+              value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               bg="white"
               borderRadius="lg"
@@ -282,9 +282,9 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
                       </HStack>
                       <Text fontSize="sm" color="gray.500" mb={3}>{user.email}</Text>
                       <HStack justify="flex-end" spacing={2}>
-                         <IconButton size="sm" icon={<RiEyeLine />} onClick={() => onUserClick(user.id)} variant="ghost" aria-label="Voir" />
-                         <IconButton size="sm" icon={<RiEditLine />} onClick={() => handleOpenEdit(user)} variant="ghost" aria-label="Modifier" />
-                         <IconButton size="sm" colorScheme="orange" icon={<RiKeyLine />} onClick={() => { setUserToReset(user); onResetOpen(); }} variant="ghost" aria-label="Reset" />
+                        <IconButton size="sm" icon={<RiEyeLine />} onClick={() => onUserClick(user.id)} variant="ghost" aria-label="Voir" />
+                        <IconButton size="sm" icon={<RiEditLine />} onClick={() => handleOpenEdit(user)} variant="ghost" aria-label="Modifier" />
+                        <IconButton size="sm" colorScheme="orange" icon={<RiKeyLine />} onClick={() => { setUserToReset(user); onResetOpen(); }} variant="ghost" aria-label="Reset" />
                       </HStack>
                     </Box>
                   ))}
@@ -297,9 +297,9 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
         {/* PAGINATION FIXE */}
         <HStack justify="space-between" mt={4} pt={4} borderTop="1px solid" borderColor="gray.200">
           <Select w="100px" size="sm" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} bg="white">
-            <option value={8}>8</option>
-            <option value={15}>15</option>
             <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={200}>200</option>
           </Select>
           <ButtonGroup isAttached size="sm" variant="outline">
             <Button isDisabled={!prevCursor} onClick={() => loadUsers(prevCursor)} leftIcon={<RiArrowLeftSLine />}>Précédent</Button>
@@ -396,7 +396,7 @@ export default function UserManager({ onUserClick }: { onUserClick: (id: string 
           </AlertDialogContent>
         </AlertDialogOverlay>
       </AlertDialog>
-      
+
     </Container>
   );
 }

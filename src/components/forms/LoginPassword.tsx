@@ -77,7 +77,7 @@ export default function LoginPassword() {
         navigate('/', { replace: true });
       }, 500);
     }
-    
+
     // Cleanup : annuler la redirection programmée si le composant est unmount
     return () => {
       if (navigationTimeoutRef.current) {
@@ -104,7 +104,7 @@ export default function LoginPassword() {
       }, {
         skipAuth: true,
       });
-      
+
       const data = res.data;
       const authData = data.data || data;
 
@@ -117,25 +117,25 @@ export default function LoginPassword() {
 
       setTokens(authData.access, authData.refresh || null);
       login(authData.user, authData.access);
-      
+
       if (authData.tenant_url) {
         updateApiBaseURL(authData.tenant_url);
-        
+
         try {
           await axios.get(`${authData.tenant_url}/api/v1/customers/auth/session-establish/`, {
             headers: {
-              'Authorization': `Bearer ${authData.access}` 
+              'Authorization': `Bearer ${authData.access}`
             },
             withCredentials: true,
             timeout: 5000,
           });
         } catch (sessionErr: any) {
-          const errorMsg = sessionErr?.response?.data?.detail || 
-                           sessionErr?.response?.data?.message ||
-                           sessionErr?.message ||
-                           'Impossible d\'établir la session';
+          const errorMsg = sessionErr?.response?.data?.detail ||
+            sessionErr?.response?.data?.message ||
+            sessionErr?.message ||
+            'Impossible d\'établir la session';
           setSessionError(`Session: ${errorMsg}`);
-          
+
           toast({
             title: 'Avertissement',
             description: errorMsg,
@@ -148,17 +148,21 @@ export default function LoginPassword() {
 
       sessionStorage.removeItem('login_username');
       sessionStorage.removeItem('keep_signed_in');
-      
-      toast({
-        title: 'Connexion réussie',
-        status: 'success',
-        duration: 2000,
-        isClosable: true,
-      });
-      
+
+      setTimeout(() => {
+        toast({
+          title: 'Connexion réussie',
+          status: 'success',
+          duration: 2000,
+          isClosable: true,
+        });
+      }, 2000);
+
+
+
       navigationTimeoutRef.current = setTimeout(() => {
         navigate('/dashboard', { replace: true });
-      }, 500);
+      }, 200);
 
     } catch (err: any) {
       const errorMsg = extractErrorMessage(err);
@@ -170,12 +174,12 @@ export default function LoginPassword() {
 
   return (
     <Center minH="100vh" p={4}>
-      <Box 
-        maxW="400px" 
-        w="full" 
-        p={8} 
-        boxShadow="xl" 
-        borderRadius="2xl" 
+      <Box
+        maxW="400px"
+        w="full"
+        p={8}
+        boxShadow="xl"
+        borderRadius="2xl"
         bg="white"
         border="1px solid"
         borderColor="gray.100"
@@ -186,7 +190,7 @@ export default function LoginPassword() {
           </VStack>
 
           {username && (
-            <HStack spacing={1} justify="center" bg="gray.50" p={2} borderRadius="md"> 
+            <HStack spacing={1} justify="center" bg="gray.50" p={2} borderRadius="md">
               <HiOutlineUserCircle size="18px" />
               <Text fontWeight="medium">{username}</Text>
             </HStack>
