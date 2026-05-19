@@ -22,13 +22,14 @@ import Sidebar from '../components/layout/Sidebar';
 import UserManager from '../components/dashboard/UserManager';
 import UserDetails from '../components/dashboard/UserDetails';
 import TicketManager from '../components/dashboard/TicketManager';
+import TicketDetailPage from './TicketDetailPage';
 import TicketModal from '../components/dashboard/TicketModal';
 import DashboardHome from '../components/dashboard/DashboardHome';
 import CockpitManager from '../components/cockpit/CockpitManager';
 
 
 // ================= TYPES =================
-type DashboardView = 'home' | 'profile' | 'users' | 'user-detail' | 'tickets';
+type DashboardView = 'home' | 'profile' | 'users' | 'user-detail' | 'tickets' | 'ticket-detail' | 'cockpit';
 
 // ================= COMPONENT =================
 export default function Dashboard() {
@@ -44,6 +45,9 @@ export default function Dashboard() {
   const [selectedUserId, setSelectedUserId] = useState<string | number | null>(() => {
     return localStorage.getItem('selected_user_id');
   });
+
+  // État pour l'ID du ticket sélectionné
+  const [selectedTicketId, setSelectedTicketId] = useState<string | number | null>(null);
 
   // État pour la vue actuelle (conservation au rafraîchissement)
   const [view, setViewState] = useState<DashboardView>(() =>
@@ -78,6 +82,13 @@ export default function Dashboard() {
     } else if (newView !== 'user-detail') {
       setSelectedUserId(null);
       localStorage.removeItem('selected_user_id');
+    }
+
+    // Gestion spécifique pour le détail de ticket
+    if (newView === 'ticket-detail' && id) {
+      setSelectedTicketId(id);
+    } else if (newView !== 'ticket-detail') {
+      setSelectedTicketId(null);
     }
 
     onClose(); // Ferme le drawer mobile si ouvert
@@ -183,7 +194,18 @@ export default function Dashboard() {
 
           {/* VUE : GESTION DES TICKETS (CRUD) */}
           {view === 'tickets' && (
-            <TicketManager ticketRefreshTrigger={ticketRefreshTrigger} />
+            <TicketManager
+              ticketRefreshTrigger={ticketRefreshTrigger}
+              onTicketClick={(id) => setView('ticket-detail', id)}
+            />
+          )}
+
+          {/* VUE : DÉTAILS D'UN TICKET */}
+          {view === 'ticket-detail' && selectedTicketId && (
+            <TicketDetailPage
+              ticketId={selectedTicketId}
+              onBack={() => setView('tickets')}
+            />
           )}
 
           {/* VUE : GESTION DES UTILISATEURS */}

@@ -67,9 +67,10 @@ export default function EquipmentTable() {
       <Table variant="simple" size="sm">
         <Thead bg="gray.50">
           <Tr>
-            <Th>Code</Th>
+            <Th>Série </Th>
             <Th>Désignation</Th>
-            <Th>Localisation</Th>
+            <Th>Emplacement</Th>
+            <Th>CRITICITE</Th>
             <Th textAlign="center">Actions</Th>
           </Tr>
         </Thead>
@@ -88,7 +89,12 @@ export default function EquipmentTable() {
                     {eq.name}
                   </Flex>
                 </Td>
-                <Td color="gray.600">{eq.location || "Non spécifié"}</Td>
+                <Td color="gray.600">{eq.emplacement || "Non spécifié"}</Td>
+                <Td color="gray.600">
+                  <Badge colorScheme={eq.criticality === 'critical' ? 'red' : eq.criticality === 'high' ? 'orange' : 'green'}>
+                    {eq.criticality?.toUpperCase() || "Non spécifié"}
+                  </Badge>
+                </Td>
                 <Td>
                   <Flex justify="center" gap={2}>
                     <IconButton 

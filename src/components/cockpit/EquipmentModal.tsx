@@ -120,10 +120,10 @@ export default function EquipmentModal({ isOpen, onClose, equipment, onSuccess }
                                     value={formData.criticality}
                                     onChange={(e) => setFormData({ ...formData, criticality: e.target.value })}
                                 >
-                                    <option value="LOW">Basse</option>
-                                    <option value="MEDIUM">Moyenne</option>
-                                    <option value="HIGH">Haute</option>
-                                    <option value="CRITICAL">Critique</option>
+                                    <option value="low">Basse</option>
+                                    <option value="medium">Moyenne</option>
+                                    <option value="high">Haute</option>
+                                    <option value="critical">Critique</option>
                                 </Select>
                             </FormControl>
                         </SimpleGrid>

@@ -2,10 +2,10 @@ import {
     Box, Flex, Text, Input, InputGroup, InputLeftElement,
     Table, Thead, Tbody, Tr, Th, Td, Badge, Spinner, useToast,
     VStack, Center, HStack,
-    IconButton
 } from '@chakra-ui/react';
-import { SearchIcon, ViewIcon } from '@chakra-ui/icons';
+import { SearchIcon } from '@chakra-ui/icons';
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../api/apiClient';
 
 // --- INTERFACES ---
@@ -17,10 +17,12 @@ interface Ticket {
     technician_name?: string;
     planned_at?: string;
     is_late?: boolean;
+    created_at?: string;
 }
 
 interface TicketManagerProps {
     ticketRefreshTrigger?: number;
+    onTicketClick?: (ticketId: number) => void;
 }
 
 const getStatusDetails = (status: string) => {
@@ -40,8 +42,9 @@ const getStatusDetails = (status: string) => {
     }
 };
 
-export default function TicketManager({ ticketRefreshTrigger }: TicketManagerProps) {
+export default function TicketManager({ ticketRefreshTrigger, onTicketClick }: TicketManagerProps) {
     const toast = useToast();
+    const navigate = useNavigate();
 
     const [tickets, setTickets] = useState<Ticket[]>([]);
     const [loading, setLoading] = useState(true);
@@ -74,6 +77,15 @@ export default function TicketManager({ ticketRefreshTrigger }: TicketManagerPro
             fetchTickets();
         }
     }, [ticketRefreshTrigger, fetchTickets]);
+
+    // ================= NAVIGATION =================
+    const handleViewTicket = (ticketId: number) => {
+        if (onTicketClick) {
+            onTicketClick(ticketId);
+            return;
+        }
+        navigate(`/tickets/${ticketId}`);
+    };
 
     return (
         <VStack spacing={6} align="stretch" p={4}>
@@ -109,8 +121,8 @@ export default function TicketManager({ ticketRefreshTrigger }: TicketManagerPro
                                 <Th>Equipement</Th>
                                 <Th>Technicien</Th>
                                 <Th>Statut</Th>
-                                <Th>Date</Th>
-                                <Th textAlign="right">Actions</Th>
+                                <Th>cree le</Th>
+                                <Th>Planifié le</Th>
                             </Tr>
                         </Thead>
 
@@ -123,8 +135,10 @@ export default function TicketManager({ ticketRefreshTrigger }: TicketManagerPro
                                         bg={statusDetails.row}
                                         borderLeft="4px solid"
                                         borderLeftColor={statusDetails.border}
-                                        _hover={{ filter: "brightness(0.97)" }}
+                                        _hover={{ filter: "brightness(0.97)", bg: 'gray.100' }}
                                         transition="0.2s"
+                                        cursor="pointer"
+                                        onClick={() => handleViewTicket(t.id)}
                                     >
                                         <Td fontWeight="bold">{t.equipment_name || t.equipment_details?.name || 'N/A'}</Td>
                                         <Td>{t.technician_name || '-'}</Td>
@@ -132,6 +146,18 @@ export default function TicketManager({ ticketRefreshTrigger }: TicketManagerPro
                                             <Badge colorScheme={statusDetails.badge} borderRadius="full" px={3} variant="solid" fontSize="10px">
                                                 {statusDetails.label} {/* Affichage en Français */}
                                             </Badge>
+                                        </Td>
+                                        <Td fontSize="sm">
+                                            {t.created_at
+                                                ? new Date(t.created_at).toLocaleString('fr-FR', {
+                                                    day: '2-digit',
+                                                    month: '2-digit',
+                                                    year: 'numeric',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit',
+                                                    second: '2-digit'
+                                                })
+                                                : '-'}
                                         </Td>
                                         <Td fontSize="sm">
                                             {t.planned_at
@@ -144,9 +170,6 @@ export default function TicketManager({ ticketRefreshTrigger }: TicketManagerPro
                                                     second: '2-digit'
                                                 })
                                                 : '-'}
-                                        </Td>
-                                        <Td textAlign="right">
-                                            <IconButton aria-label="Voir" icon={<ViewIcon />} size="sm" variant="ghost" colorScheme="purple" />
                                         </Td>
                                     </Tr>
                                 );
