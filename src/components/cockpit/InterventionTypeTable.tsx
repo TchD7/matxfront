@@ -4,7 +4,7 @@ import {
     useDisclosure, useToast, Text, Spinner, Center, HStack
 } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
-import { FiPlus, FiEdit2, FiTrash2, FiActivity } from 'react-icons/fi';
+import { FiPlus, FiEdit2, FiTrash2 } from 'react-icons/fi';
 import api from '../../api/apiClient';
 import InterventionTypeModal from './InterventionTypeModal';
 
@@ -18,8 +18,8 @@ export default function InterventionTypeTable() {
     const fetchTypes = async () => {
         try {
             setLoading(true);
-            const res = await api.get('/api/v1/intervention-types/');
-            // On récupère les données (gestion du wrapper 'results' si pagination)
+            // 👈 ICI : Ajout du paramètre query pour demander au backend d'inclure les inactifs
+            const res = await api.get('/api/v1/intervention-types/?include_inactive=true');
             setTypes(res.data.results || res.data);
         } catch (err) {
             toast({ title: "Erreur de chargement", status: "error" });
@@ -61,7 +61,7 @@ export default function InterventionTypeTable() {
             <Flex justify="space-between" align="center" mb={6}>
                 <Box>
                     <Text fontWeight="bold" fontSize="lg">Types d'Intervention</Text>
-                    <Text fontSize="xs" color="gray.500">Définissez les catégories et champs personnalisés</Text>
+                    <Text fontSize="xs" color="gray.500">Définissez les catégories et champs personnalisés (Actifs et Inactifs)</Text>
                 </Box>
                 <Button leftIcon={<FiPlus />} colorScheme="purple" onClick={handleAdd} size="sm">
                     Nouveau Type
@@ -83,13 +83,19 @@ export default function InterventionTypeTable() {
                         <Tr><Td colSpan={5} textAlign="center" py={10} color="gray.400">Aucun type configuré</Td></Tr>
                     ) : (
                         types.map((type: any) => (
-                            <Tr key={type.id} _hover={{ bg: 'gray.50' }}>
+                            <Tr
+                                key={type.id}
+                                _hover={{ bg: 'gray.50' }}
+                                // 👈 ICI : Si le type est inactif, on applique une opacité pour le différencier graphiquement
+                                opacity={type.is_active ? 1 : 0.65}
+                                bg={type.is_active ? "transparent" : "gray.50"}
+                            >
                                 <Td>
                                     <Badge colorScheme={type.is_active ? "green" : "red"} variant="subtle">
                                         {type.is_active ? "Actif" : "Inactif"}
                                     </Badge>
                                 </Td>
-                                <Td fontWeight="bold" color={type.is_active ? "gray.800" : "gray.400"}>
+                                <Td fontWeight="bold" color={type.is_active ? "gray.800" : "gray.500"}>
                                     {type.name}
                                 </Td>
                                 <Td noOfLines={1} maxW="200px" color="gray.600">
@@ -97,7 +103,7 @@ export default function InterventionTypeTable() {
                                 </Td>
                                 <Td>
                                     {type.fields ? (
-                                        <Badge variant="outline" colorScheme="blue">
+                                        <Badge variant="outline" colorScheme={type.is_active ? "blue" : "gray"}>
                                             {Object.keys(type.fields).length} champ(s)
                                         </Badge>
                                     ) : (

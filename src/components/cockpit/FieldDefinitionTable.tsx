@@ -98,103 +98,10 @@ export default function FieldDefinitionTable() {
                     <Text fontSize="xs" color="gray.500">
                         Configuration des formulaires d'intervention
                     </Text>
-                </Box>
-
-                <Button
-                    leftIcon={<FiPlus />}
-                    colorScheme="purple"
-                    size="sm"
-                    onClick={handleAdd}
-                >
-                    Nouveau champ
-                </Button>
+                </Box>      
             </Flex>
 
-            <Table size="sm" variant="simple">
-                <Thead bg="gray.50">
-                    <Tr>
-                        <Th>Type</Th>
-                        <Th>Label</Th>
-                        <Th>Code</Th>
-                        <Th>Champ</Th>
-                        <Th>Obligatoire</Th>
-                        <Th>Intervention</Th>
-                        <Th textAlign="center">Actions</Th>
-                    </Tr>
-                </Thead>
 
-                <Tbody>
-                    {fields.length === 0 ? (
-                        <Tr>
-                            <Td colSpan={7} textAlign="center" py={10} color="gray.400">
-                                Aucun champ configuré
-                            </Td>
-                        </Tr>
-                    ) : (
-                        fields.map((field: any) => (
-                            <Tr key={field.id} _hover={{ bg: 'gray.50' }}>
-
-                                <Td>
-                                    <Badge colorScheme="blue" variant="subtle">
-                                        {field.field_type}
-                                    </Badge>
-                                </Td>
-
-                                <Td fontWeight="bold">
-                                    {field.label}
-                                </Td>
-
-                                <Td>
-                                    <Text fontSize="xs" color="gray.500">
-                                        {field.code || "-"}
-                                    </Text>
-                                </Td>
-
-                                <Td>
-                                    <Badge variant="outline">
-                                        {field.field_type}
-                                    </Badge>
-                                </Td>
-
-                                <Td>
-                                    <Badge colorScheme={field.required ? "red" : "gray"}>
-                                        {field.required ? "Oui" : "Non"}
-                                    </Badge>
-                                </Td>
-
-                                <Td>
-                                    <Text fontSize="xs" color="gray.600">
-                                        {field.intervention_type?.name || "-"}
-                                    </Text>
-                                </Td>
-
-                                <Td>
-                                    <HStack justify="center" spacing={2}>
-                                        <IconButton
-                                            aria-label="edit"
-                                            icon={<FiEdit2 />}
-                                            size="xs"
-                                            variant="ghost"
-                                            colorScheme="blue"
-                                            onClick={() => handleEdit(field)}
-                                        />
-
-                                        <IconButton
-                                            aria-label="delete"
-                                            icon={<FiTrash2 />}
-                                            size="xs"
-                                            variant="ghost"
-                                            colorScheme="red"
-                                            onClick={() => handleDelete(field.id)}
-                                        />
-                                    </HStack>
-                                </Td>
-
-                            </Tr>
-                        ))
-                    )}
-                </Tbody>
-            </Table>
 
             <FieldDefinitionModal
                 isOpen={isOpen}
