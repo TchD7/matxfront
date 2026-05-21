@@ -19,10 +19,11 @@ import api from '../api/apiClient';
 
 // Components
 import TicketHeader from '../components/tickets/TicketHeader';
-import TicketStatusBadge from '../components/tickets/TicketStatusBadge';
 import TicketStatusDetail from '../components/tickets/TicketStatusDetail';
 import TicketPlanningForm from '../components/tickets/TicketPlanningForm';
 import TicketLogsTab from '../components/tickets/TicketLogsTab';
+import TicketFieldsTab from '../components/tickets/TicketFieldsTab';
+import TicketConsumablesTab from '../components/tickets/TicketConsumablesTab';
 
 // Actions
 import {
@@ -52,7 +53,6 @@ interface TicketDetailPageProps {
     onBack?: () => void;
 }
 
-// ================= COMPONENT =================
 // ================= COMPONENT =================
 export default function TicketDetailPage({ ticketId, onBack }: TicketDetailPageProps) {
     const { id } = useParams();
@@ -103,6 +103,34 @@ export default function TicketDetailPage({ ticketId, onBack }: TicketDetailPageP
             switch (action) {
                 case 'start':
                     await startTicket(ticket.id, { technician_id: 1 });
+                    break;
+
+                case 'duplicate':
+                    // Appel à ton API Django (ex: POST /api/v1/tickets/123/duplicate/)
+                    // Ton backend devrait renvoyer les données du nouveau ticket, dont son nouvel ID
+                    const response = await api.post(`/api/v1/tickets/${ticket.id}/duplicate/`);
+                    const newTicket = response.data;
+
+                    toast({
+                        title: 'Ticket dupliqué',
+                        description: `Le ticket clone #${newTicket.number || newTicket.id} a été créé.`,
+                        status: 'success',
+                        duration: 3000,
+                        isClosable: true,
+                    });
+
+                    // Redirection vers le nouveau ticket pour que l'utilisateur puisse le modifier/traiter
+                    if (onBack) {
+                        // Si tu es dans un tiroir (Drawer) ou une modale, on rafraîchit la liste parente
+                        onBack();
+                    } else {
+                        // Si tu es sur une page classique, on navigue vers le détail du nouveau ticket
+                        navigate(`/tickets/${newTicket.id}`);
+                    }
+                    return; // On quitte la fonction pour éviter le refresh() du vieux ticket
+
+                case 'complete':
+                    await completeTicket(ticket.id, { technician_id: currentTechId, result: 'ok' });
                     break;
                 case 'complete':
                     await completeTicket(ticket.id, { technician_id: 1, result: 'ok' });
@@ -178,19 +206,27 @@ export default function TicketDetailPage({ ticketId, onBack }: TicketDetailPageP
                         />
                     )}
 
-                    {/* STATUS QUICK VIEW */}
-                    <Box>
-                        <TicketStatusBadge status={ticket.status} />
-                    </Box>
-
-                    {/* WORKFLOW TABS */}
-                    <Tabs variant="enclosed" colorScheme="purple">
+                    {/* CENTRALIZED TABS COMPONENT */}
+                    <Tabs variant="enclosed" colorScheme="purple" bg="white" p={4} borderRadius="lg" shadow="sm">
                         <TabList>
-                            <Tab>Logs</Tab>
+                            <Tab fontWeight="semibold">Champs personnalisés</Tab>
+                            <Tab fontWeight="semibold">Consommables</Tab>
+                            <Tab fontWeight="semibold">Logs & Historique</Tab>
                         </TabList>
+
                         <TabPanels>
+                            {/* FIELDS */}
+                            <TabPanel px={0} pt={4}>
+                                <TicketFieldsTab ticket={ticket} />
+                            </TabPanel>
+
+                            {/* CONSUMABLES */}
+                            <TabPanel px={0} pt={4}>
+                                <TicketConsumablesTab ticket={ticket} onRefresh={refresh} />
+                            </TabPanel>
+
                             {/* LOGS */}
-                            <TabPanel>
+                            <TabPanel px={0} pt={4}>
                                 <TicketLogsTab ticket={ticket} />
                             </TabPanel>
                         </TabPanels>

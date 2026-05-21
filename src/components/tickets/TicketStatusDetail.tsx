@@ -124,7 +124,7 @@ const getStatusConfig = (status: string) => {
         case 'closed':
             return {
                 label: 'Clôturé',
-                color: 'teal', // 🟢 Correction : 'solid' n'est pas une couleur Chakra UI, remplacé par 'teal'
+                color: 'teal',
                 progress: 100,
                 description: 'Ticket archivé et clôturé',
                 icon: FiCheckCircle,
@@ -185,9 +185,11 @@ interface TicketStatusDetailProps {
 
 export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) {
     const statusConfig = getStatusConfig(ticket.status);
-    console.log("Données du ticket reçues :", ticket);
-
     const StatusIcon = statusConfig.icon as ComponentType;
+
+    const hasActualDuration = ticket.actual_duration !== undefined && ticket.actual_duration !== null;
+    // 🟢 Correction : On affiche la durée réelle si dispo, sinon l'estimée
+    const durationToDisplay = hasActualDuration ? ticket.actual_duration : ticket.estimated_duration;
 
     // ================= HELPERS =================
     const getProgressColor = () => {
@@ -211,6 +213,7 @@ export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) 
                 return 'gray';
         }
     };
+
     const formatDate = (date?: string) => {
         if (!date) return 'N/A';
         return new Date(date).toLocaleString('fr-FR', {
@@ -218,10 +221,10 @@ export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) 
             timeStyle: 'short',
         });
     };
-    // 1. Modifie la fonction de formatage pour gérer le cas où c'est vide
+
     const formatDuration = (minutes?: number | null) => {
         if (minutes === undefined || minutes === null || minutes === 0) {
-            return "Non spécifiée"; // Évite le "N/A" si le champ est null en base
+            return "Non spécifiée";
         }
 
         const hours = Math.floor(minutes / 60);
@@ -232,12 +235,6 @@ export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) 
         }
         return `${mins}min`;
     };
-
-    // 2. On cible directement ton champ Django 'estimated_duration'
-    const durationToDisplay = ticket.estimated_duration;
-
-    const hasActualDuration = ticket.actual_duration !== undefined && ticket.actual_duration !== null;
-
 
     return (
         <Box
@@ -445,55 +442,62 @@ export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) 
                     </Box>
                 )}
 
-                <Divider />
-
                 {/* TIMELINE */}
-                <Box>
-                    <Text fontSize="sm" fontWeight="bold" mb={3}>
-                        Chronologie
-                    </Text>
+                {/* 🟢 Correction : N'affiche le bloc et le Divider que s'il y a au moins une date */}
+                {(ticket.planned_at || ticket.started_at || ticket.ended_at) && (
+                    <>
+                        <Divider />
+                        <Box>
+                            <Text fontSize="sm" fontWeight="bold" mb={3}>
+                                Chronologie
+                            </Text>
 
-                    <VStack align="stretch" spacing={3}>
-                        {ticket.planned_at && (
-                            <HStack>
-                                <Icon as={FiCalendar} color="purple.500" />
-                                <Text fontSize="sm">
-                                    Planifié : {formatDate(ticket.planned_at)}
-                                </Text>
-                            </HStack>
-                        )}
+                            <VStack align="stretch" spacing={3}>
+                                {ticket.planned_at && (
+                                    <HStack>
+                                        <Icon as={FiCalendar} color="purple.500" />
+                                        <Text fontSize="sm">
+                                            Planifié : {formatDate(ticket.planned_at)}
+                                        </Text>
+                                    </HStack>
+                                )}
 
-                        {ticket.started_at && (
-                            <HStack>
-                                <Icon as={FiPlay} color="blue.500" />
-                                <Text fontSize="sm">
-                                    Démarré : {formatDate(ticket.started_at)}
-                                </Text>
-                            </HStack>
-                        )}
+                                {ticket.started_at && (
+                                    <HStack>
+                                        <Icon as={FiPlay} color="blue.500" />
+                                        <Text fontSize="sm">
+                                            Démarré : {formatDate(ticket.started_at)}
+                                        </Text>
+                                    </HStack>
+                                )}
 
-                        {ticket.ended_at && (
-                            <HStack>
-                                <Icon as={FiCheckCircle} color="green.500" />
-                                <Text fontSize="sm">
-                                    Terminé : {formatDate(ticket.ended_at)}
-                                </Text>
-                            </HStack>
-                        )}
-                    </VStack>
-                </Box>
+                                {ticket.ended_at && (
+                                    <HStack>
+                                        <Icon as={FiCheckCircle} color="green.500" />
+                                        <Text fontSize="sm">
+                                            Terminé : {formatDate(ticket.ended_at)}
+                                        </Text>
+                                    </HStack>
+                                )}
+                            </VStack>
+                        </Box>
+                    </>
+                )}
 
                 {/* ACTIONS */}
                 {statusConfig.actions.length > 0 && (
-                    <Alert status="info" borderRadius="lg">
-                        <AlertIcon />
-                        <Box>
-                            <AlertTitle fontSize="sm">Actions disponibles</AlertTitle>
-                            <AlertDescription fontSize="sm">
-                                {statusConfig.actions.join(' • ')}
-                            </AlertDescription>
-                        </Box>
-                    </Alert>
+                    <>
+                        <Divider />
+                        <Alert status="info" borderRadius="lg">
+                            <AlertIcon />
+                            <Box>
+                                <AlertTitle fontSize="sm">Actions disponibles</AlertTitle>
+                                <AlertDescription fontSize="sm">
+                                    {statusConfig.actions.join(' • ')}
+                                </AlertDescription>
+                            </Box>
+                        </Alert>
+                    </>
                 )}
             </VStack>
         </Box>

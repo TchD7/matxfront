@@ -98,7 +98,7 @@ export default function TicketManager({ onTicketClick }: { onTicketClick?: (id: 
                 setTechnicians(fetchedUsers);
 
                 // 2. Récupération des équipements (Gestion robuste si tableau direct ou paginé)
-                const equipRes = await api.get('/api/v1/customers/equipments/', { params: { page_size: 200 } });
+                const equipRes = await api.get('/api/v1/equipments/', { params: { page_size: 200 } });
                 const fetchedEquips = Array.isArray(equipRes.data)
                     ? equipRes.data
                     : (equipRes.data?.results || equipRes.data?.data?.results || []);

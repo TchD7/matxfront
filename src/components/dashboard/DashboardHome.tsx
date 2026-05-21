@@ -11,7 +11,7 @@ import {
     Heading,
     Container,
     Badge,
-    IconButton, // 👈 Ajouté ici
+    IconButton,
 } from '@chakra-ui/react';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
@@ -27,15 +27,12 @@ interface Props {
 
 interface Technician {
     id: number | string;
-    technician_id?: number | string;
-    technician_name?: string;
-    username?: string;
+    first_name?: string;
+    last_name?: string;
     team_code?: string;
     planned: number;
     in_progress: number;
     completed: number;
-    closed: number;
-    total: number;
 }
 
 interface Ticket {
@@ -71,15 +68,18 @@ export default function DashboardHome({ user }: Props) {
 
     const [date, setDate] = useState(today);
     const [loading, setLoading] = useState(true);
-    const [data, setData] = useState<any>(null);
+    const [dashboardData, setDashboardData] = useState<any>(null);
+
+    // Notre référentiel complet de techniciens
+    const [techRegistry, setTechRegistry] = useState<any[]>([]);
     const [tickets, setTickets] = useState<Ticket[]>([]);
 
-    const [searchTech, setSearchTech] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
     const [selectedTech, setSelectedTech] = useState<string | null>(null);
 
     const toast = useToast();
 
-    // ================= DATE =================
+    // ================= DATE CHANGING =================
     const changeDate = (offset: number) => {
         setDate((current) => {
             const d = new Date(current);
@@ -88,26 +88,40 @@ export default function DashboardHome({ user }: Props) {
         });
     };
 
-    // ================= FETCH =================
+    // ================= FETCH STATIC REGISTRY ONCE =================
+    useEffect(() => {
+        const fetchRegistry = async () => {
+            try {
+                const res = await api.get('/api/v1/technicians/');
+                const raw = res.data?.results || res.data;
+                setTechRegistry(Array.isArray(raw) ? raw : []);
+            } catch (err) {
+                console.error("Impossible de charger le référentiel des techniciens", err);
+            }
+        };
+        fetchRegistry();
+    }, []);
+
+    // ================= FETCH DYNAMIC DAILY DATA =================
     const fetchDashboardData = useCallback(async () => {
         try {
             setLoading(true);
 
-            const res = await api.get('/api/v1/dashboard/', {
+            // 1. Récupération des KPI globaux
+            const dashboardRes = await api.get('/api/v1/dashboard/', {
                 params: { date }
             });
+            setDashboardData(dashboardRes.data);
 
-            setData(res.data);
-
+            // 2. Récupération des tickets du jour
             const ticketRes = await api.get('/api/v1/tickets/', {
                 params: { date }
             });
-
-            setTickets(ticketRes.data.results || []);
+            setTickets(ticketRes.data?.results || ticketRes.data || []);
 
         } catch (err) {
             toast({
-                title: 'Erreur chargement dashboard',
+                title: 'Erreur lors du chargement des données',
                 status: 'error',
                 duration: 3000
             });
@@ -120,38 +134,75 @@ export default function DashboardHome({ user }: Props) {
         fetchDashboardData();
     }, [fetchDashboardData]);
 
-    // ================= FORMAT TECH =================
-    const formatTech = (t: Technician) => {
-        const name = t.technician_name || t.username || '';
-        const team = t.team_code || '';
-        return team ? `${team}-${name}` : name;
+    // ================= DYNAMIC CALCULATIONS =================
+    const techniciansWithLiveStats = useMemo(() => {
+        return techRegistry.map((tech) => {
+            // ID du technicien du registre (ex: "499")
+            const registryId = String(tech.id || '').trim();
+
+            // Filtrage ultra-tolérant sur les tickets
+            const techTickets = tickets.filter((ticket: any) => {
+                // On récupère toutes les manières dont l'ID peut être écrit dans le ticket
+                const ticketTechId = String(ticket.technician_id || '').trim();
+                const ticketTechField = String(ticket.technician || '').trim();
+
+                // On vérifie aussi par rapport au nom/username au cas où le backend renvoie des chaînes
+                const ticketTechName = (ticket.technician_name || '').toLowerCase().trim();
+                const techFullName = `${tech.last_name || ''} ${tech.first_name || ''}`.toLowerCase().trim();
+                const techUsername = (tech.username || '').toLowerCase().trim();
+
+                return (
+                    (ticketTechId !== '' && ticketTechId === registryId) ||
+                    (ticketTechField !== '' && ticketTechField === registryId) ||
+                    (ticketTechName !== '' && (ticketTechName === techFullName || ticketTechName === techUsername))
+                );
+            });
+
+            // Calcul des compteurs (tolérant à la casse)
+            const planned = techTickets.filter(t => {
+                const status = (t.status || '').toLowerCase();
+                return status === 'planned' || status === 'planifié' || status === 'open';
+            }).length;
+
+            const in_progress = techTickets.filter(t => {
+                const status = (t.status || '').toLowerCase();
+                return status === 'in_progress' || status === 'en_cours';
+            }).length;
+
+            const completed = techTickets.filter(t => {
+                const status = (t.status || '').toLowerCase();
+                return status === 'completed' || status === 'terminé';
+            }).length;
+
+            return {
+                ...tech,
+                planned,
+                in_progress,
+                completed
+            };
+        });
+    }, [techRegistry, tickets]);
+
+    // ================= FORMAT LABELS =================
+    const getTechLabel = (tech: any) => {
+        const fullName = `${tech.last_name || ''} ${tech.first_name || ''}`.trim();
+        return tech.team_code
+            ? `${tech.team_code}-${fullName}`
+            : fullName;
     };
 
-    // ================= FILTER TECH =================
+    // ================= FILTER & SORT TECH LIST =================
     const filteredTechs = useMemo(() => {
-        return (data?.technicians || []).filter((t: Technician) => {
-            const search = searchTech.toLowerCase();
+        return techniciansWithLiveStats
+            .filter((t: any) => {
+                const label = getTechLabel(t).toLowerCase();
+                return label.includes(searchQuery.toLowerCase());
+            })
+            // Optionnel : Met en haut de la liste les techniciens qui ont du travail aujourd'hui
+            .sort((a, b) => (b.planned + b.in_progress) - (a.planned + a.in_progress));
+    }, [techniciansWithLiveStats, searchQuery]);
 
-            return (
-                (t.technician_name || '').toLowerCase().includes(search) ||
-                (t.username || '').toLowerCase().includes(search) ||
-                (t.team_code || '').toLowerCase().includes(search)
-            );
-        });
-    }, [data, searchTech]);
-
-    // ================= FILTER TICKETS =================
-    const timelineTickets = useMemo(() => {
-        if (!selectedTech) return tickets;
-
-        return tickets.filter((ticket) => {
-            if (!ticket.technician_id) return false;
-            return String(ticket.technician_id) === String(selectedTech);
-        });
-    }, [tickets, selectedTech]);
-
-    // ================= KPI =================
-    const totalDraftTickets = tickets.filter(t => t.status === 'draft').length;
+    const totalDraftTickets = tickets.filter(t => t.status?.toLowerCase() === 'draft').length;
 
     return (
         <Container maxW="full" py={4} minH="100vh">
@@ -188,16 +239,16 @@ export default function DashboardHome({ user }: Props) {
             {/* KPI */}
             <SimpleGrid columns={{ base: 2, md: 5 }} spacing={4} mb={6}>
                 <Kpi title="Qualifié" value={totalDraftTickets} />
-                <Kpi title="Planifié" value={data?.stats?.planned ?? 0} />
-                <Kpi title="En cours" value={data?.stats?.in_progress ?? 0} />
-                <Kpi title="Terminé" value={data?.stats?.completed ?? 0} />
-                <Kpi title="Clôturé" value={data?.stats?.closed ?? 0} />
+                <Kpi title="Planifié" value={dashboardData?.stats?.planned ?? 0} />
+                <Kpi title="En cours" value={dashboardData?.stats?.in_progress ?? 0} />
+                <Kpi title="Terminé" value={dashboardData?.stats?.completed ?? 0} />
+                <Kpi title="Clôturé" value={dashboardData?.stats?.closed ?? 0} />
             </SimpleGrid>
 
-            {/* MAIN */}
+            {/* MAIN CONTENT */}
             <Flex gap={6} direction={{ base: "column", xl: "row" }}>
 
-                {/* LEFT TECHNICIENS */}
+                {/* LEFT SIDE: TECHNICIANS LIST */}
                 <Box
                     flex="1"
                     bg="white"
@@ -206,29 +257,28 @@ export default function DashboardHome({ user }: Props) {
                     border="1px solid #eee"
                     display="flex"
                     flexDirection="column"
+                    minW="320px"
                 >
                     <Text fontWeight="bold" mb={3}>
                         Techniciens
                     </Text>
 
                     <Input
-                        placeholder="Rechercher (nom, username, code)"
+                        placeholder="Rechercher (nom ou code équipe)"
                         size="sm"
                         mb={4}
-                        value={searchTech}
-                        onChange={(e) => setSearchTech(e.target.value)}
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
                     />
 
-                    {loading ? (
+                    {loading && techRegistry.length === 0 ? (
                         <Center py={10}>
-                            <Spinner />
+                            <Spinner color="purple.500" />
                         </Center>
                     ) : (
-                        <Box overflowY="auto" flex="1">
-
+                        <Box overflowY="auto" flex="1" maxH="600px">
                             {filteredTechs.map((t: Technician) => {
-
-                                const techId = String(t.technician_id || t.id);
+                                const techId = String(t.id);
                                 const isSelected = selectedTech === techId;
 
                                 return (
@@ -248,34 +298,40 @@ export default function DashboardHome({ user }: Props) {
                                         }
                                     >
                                         <Box>
-                                            <Text fontWeight="medium">
-                                                {formatTech(t)}
+                                            <Text fontWeight="medium" fontSize="sm">
+                                                {getTechLabel(t)}
                                             </Text>
-                                            <Text fontSize="xs" color="gray.500">
+                                            <Text fontSize="xs" color="gray.500" mt={0.5}>
                                                 {t.planned} planifié • {t.in_progress} en cours
                                             </Text>
                                         </Box>
 
-                                        <HStack spacing={2}>
-                                            <Badge colorScheme="purple">
+                                        <HStack spacing={1}>
+                                            <Badge colorScheme="purple" variant={t.planned > 0 ? "solid" : "subtle"}>
                                                 {t.planned}
                                             </Badge>
-                                            <Badge colorScheme="blue">
+                                            <Badge colorScheme="blue" variant={t.in_progress > 0 ? "solid" : "subtle"}>
                                                 {t.in_progress}
                                             </Badge>
-                                            <Badge colorScheme="green">
+                                            <Badge colorScheme="green" variant={t.completed > 0 ? "solid" : "subtle"}>
                                                 {t.completed}
                                             </Badge>
                                         </HStack>
                                     </Flex>
                                 );
                             })}
-
+                            {filteredTechs.length === 0 && (
+                                <Center py={6}>
+                                    <Text fontSize="xs" color="gray.400" fontStyle="italic">
+                                        Aucun technicien trouvé.
+                                    </Text>
+                                </Center>
+                            )}
                         </Box>
                     )}
                 </Box>
 
-                {/* RIGHT TIMELINE */}
+                {/* RIGHT SIDE: TIMELINE */}
                 <Box
                     flex="3"
                     bg="white"
@@ -284,16 +340,22 @@ export default function DashboardHome({ user }: Props) {
                     border="1px solid #eee"
                     display={{ base: 'none', xl: 'flex' }}
                     flexDirection="column"
+                    maxW={{ xl: "calc(100vw - 420px)", "2xl": "calc(100vw - 460px)" }}
+                    overflow="hidden"
                 >
                     <Text fontWeight="bold" mb={4}>
                         Planning Journalier
                     </Text>
 
-                    <InteractiveTimeline
-                        date={date}
-                        technicianId={selectedTech}
-                        tickets={timelineTickets}
-                    />
+                    <Box overflowX="auto" flex="1" pb={2}>
+                        <Box minW="800px">
+                            <InteractiveTimeline
+                                date={date}
+                                technicianId={selectedTech}
+                                tickets={tickets}
+                            />
+                        </Box>
+                    </Box>
                 </Box>
 
             </Flex>

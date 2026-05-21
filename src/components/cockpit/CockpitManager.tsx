@@ -2,12 +2,13 @@ import {
     Box, Heading, Tabs, TabList, TabPanels, Tab, TabPanel,
     Icon, HStack, Text, VStack
 } from '@chakra-ui/react';
-import { useState, useEffect } from 'react';
-import { FiTool, FiSettings, FiList } from 'react-icons/fi';
+import { useState } from 'react';
+import { FiTool, FiSettings, FiList, FiPackage } from 'react-icons/fi'; // Ajout de FiPackage
 
 import EquipmentTable from './EquipmentTable';
 import InterventionTypeTable from './InterventionTypeTable';
 import FieldDefinitionTable from './FieldDefinitionTable';
+import ConsumablesTable from './ConsumablesTable'; // Notre nouveau composant CRUD + Excel
 
 export default function CockpitManager() {
     // 1. On initialise l'état de l'onglet en allant lire d'abord dans le localStorage.
@@ -28,7 +29,7 @@ export default function CockpitManager() {
             <VStack align="start" spacing={1} mb={6}>
                 <Heading size="lg" color="gray.800">Cockpit Technique</Heading>
                 <Text color="gray.500">
-                    Gerez votre parc machine et vos configurations d’interventions
+                    Gérez votre parc machine, vos configurations d’interventions et votre catalogue de stock.
                 </Text>
             </VStack>
 
@@ -57,6 +58,14 @@ export default function CockpitManager() {
                         </HStack>
                     </Tab>
 
+                    {/* --- NOUVEL ONGLET CONSOMMABLES --- */}
+                    <Tab _selected={{ color: 'purple.600', bg: 'purple.50', fontWeight: 'bold' }}>
+                        <HStack spacing={2}>
+                            <Icon as={FiPackage} />
+                            <Text>Consommables</Text>
+                        </HStack>
+                    </Tab>
+
                 </TabList>
 
                 <TabPanels mt={4}>
@@ -71,6 +80,11 @@ export default function CockpitManager() {
                     <TabPanel p={0}>
                         {/* C'est ton composant de déploiement réécrit ensemble */}
                         <FieldDefinitionTable />
+                    </TabPanel>
+
+                    {/* --- PANNEAU DU CONTENU CONSOMMABLES --- */}
+                    <TabPanel p={0}>
+                        <ConsumablesTable />
                     </TabPanel>
                 </TabPanels>
             </Tabs>

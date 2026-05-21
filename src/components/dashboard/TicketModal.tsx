@@ -191,7 +191,7 @@ export default function TicketModal({
                                 <FormControl>
                                     <FormLabel>Type d'intervention</FormLabel>
                                     <Select
-                                        placeholder="Optionnel"
+                                        placeholder="Choisir un type d'intervention"
                                         value={formData.intervention_type_id}
                                         onChange={(e) =>
                                             setFormData({ ...formData, intervention_type_id: e.target.value })

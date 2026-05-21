@@ -10,14 +10,14 @@ export default function EquipmentModal({ isOpen, onClose, equipment, onSuccess }
     const toast = useToast();
     const [loading, setLoading] = useState(false);
 
-    // État du formulaire basé sur ton Serializer
+
     const [formData, setFormData] = useState({
         name: '',
         code: '',
         emplacement: '',
         series: '',
         marque: '',
-        criticality: 'MEDIUM',
+        criticality: 'medium',
         nominal_cycle_time: 0
     });
 
@@ -30,13 +30,15 @@ export default function EquipmentModal({ isOpen, onClose, equipment, onSuccess }
                 emplacement: equipment.emplacement || '',
                 series: equipment.series || '',
                 marque: equipment.marque || '',
-                criticality: equipment.criticality || 'MEDIUM',
+                // 2. FIX : 'medium' par défaut si la criticité de l'équipement est absente
+                criticality: equipment.criticality || 'medium',
                 nominal_cycle_time: equipment.nominal_cycle_time || 0
             });
         } else {
             setFormData({
                 name: '', code: '', emplacement: '', series: '',
-                marque: '', criticality: 'MEDIUM', nominal_cycle_time: 0
+                // 3. FIX : 'medium' ici aussi pour la remise à zéro
+                marque: '', criticality: 'medium', nominal_cycle_time: 0
             });
         }
     }, [equipment, isOpen]);

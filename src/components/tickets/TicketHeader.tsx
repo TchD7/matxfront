@@ -7,6 +7,14 @@ import {
     Badge,
     Button,
     Divider,
+    Modal,
+    ModalOverlay,
+    ModalContent,
+    ModalHeader,
+    ModalFooter,
+    ModalBody,
+    ModalCloseButton,
+    useDisclosure,
 } from '@chakra-ui/react';
 
 // ================= TYPES =================
@@ -56,9 +64,20 @@ export default function TicketHeader({
 }: {
     ticket: Ticket;
     onBack?: () => void;
-    onAction?: (action: string) => void;
+    // Mise à jour de la signature pour passer le mode au parent s'il s'agit d'une duplication
+    onAction?: (action: string, payload?: { mode: 'linked' | 'independent' }) => void;
 }) {
     const status = getStatus(ticket.status);
+
+    // Hook Chakra UI pour contrôler l'ouverture de la modal
+    const { isOpen, onOpen, onClose } = useDisclosure();
+
+    const handleDuplicateSubmit = (mode: 'linked' | 'independent') => {
+        if (onAction) {
+            onAction('duplicate', { mode });
+        }
+        onClose(); // Ferme la modal après sélection
+    };
 
     return (
         <Box
@@ -112,6 +131,18 @@ export default function TicketHeader({
                         </Button>
                     )}
 
+                    {/* DUPLICATE BUTTON - Ouvre désormais la modal au clic */}
+                    {ticket.status !== 'draft' && onAction && (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            colorScheme="gray"
+                            onClick={onOpen}
+                        >
+                            Dupliquer
+                        </Button>
+                    )}
+
                     {/* DELETE BUTTON - Always visible */}
                     {onAction && (
                         <Button
@@ -158,6 +189,67 @@ export default function TicketHeader({
             </Flex>
 
             <Divider mt={3} />
+
+            {/* ================= MODAL DE CHOIX DE DUPLICATION ================= */}
+            <Modal isOpen={isOpen} onClose={onClose} isCentered size="md">
+                <ModalOverlay backdropFilter="blur(4px)" />
+                <ModalContent p={2}>
+                    <ModalHeader fontSize="md" fontWeight="bold">
+                        Options de duplication
+                    </ModalHeader>
+                    <ModalCloseButton />
+
+                    <ModalBody>
+                        <VStack spacing={4} align="stretch">
+                            <Text fontSize="sm" color="gray.600">
+                                Choisissez la manière dont vous souhaitez dupliquer le ticket <strong>{ticket.number}</strong> :
+                            </Text>
+
+                            {/* Option 1: Duplication Liée */}
+                            <Box
+                                border="1px solid"
+                                borderColor="gray.200"
+                                borderRadius="md"
+                                p={3}
+                                cursor="pointer"
+                                _hover={{ borderColor: 'blue.400', bg: 'blue.50' }}
+                                onClick={() => handleDuplicateSubmit('linked')}
+                            >
+                                <Text fontWeight="semibold" fontSize="sm" color="blue.700">
+                                    Duplication Liée (Enfant)
+                                </Text>
+                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                    Génère une sous-tâche liée à ce ticket (ex: {ticket.number}_1).
+                                </Text>
+                            </Box>
+
+                            {/* Option 2: Duplication Indépendante */}
+                            <Box
+                                border="1px solid"
+                                borderColor="gray.200"
+                                borderRadius="md"
+                                p={3}
+                                cursor="pointer"
+                                _hover={{ borderColor: 'purple.400', bg: 'purple.50' }}
+                                onClick={() => handleDuplicateSubmit('independent')}
+                            >
+                                <Text fontWeight="semibold" fontSize="sm" color="purple.700">
+                                    Duplication Indépendante (Nouveau ticket)
+                                </Text>
+                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                    Crée un tout nouveau ticket autonome avec son propre numéro incrémenté. Aucune relation parent-enfant.
+                                </Text>
+                            </Box>
+                        </VStack>
+                    </ModalBody>
+
+                    <ModalFooter>
+                        <Button size="sm" variant="ghost" onClick={onClose}>
+                            Annuler
+                        </Button>
+                    </ModalFooter>
+                </ModalContent>
+            </Modal>
         </Box>
     );
 }

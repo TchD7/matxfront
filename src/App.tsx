@@ -30,6 +30,10 @@ function App() {
         {/* Routes publiques */}
         <Route path="/" element={<LoginPage />} />
         <Route path="/login-password" element={<LoginPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/reset-password-token" element={<ResetPasswordToken />} />
+        <Route path="/accept-invitation/:token" element={<AcceptInvitation />} />
+
 
         {/* Routes protégées - accessibles uniquement si l'utilisateur est authentifié */}
         <Route
