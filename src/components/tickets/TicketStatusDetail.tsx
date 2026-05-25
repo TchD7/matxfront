@@ -61,6 +61,7 @@ interface Ticket {
 
     is_breakdown?: boolean;
     is_late?: boolean;
+    late_duration_minutes?: number | null;
 
     priority?: string;
 
@@ -71,9 +72,10 @@ interface Ticket {
 // ================= STATUS CONFIG =================
 const getStatusConfig = (status: string) => {
     switch (status?.toLowerCase()) {
+        case 'draft':
         case 'open':
             return {
-                label: 'Ouvert',
+                label: 'Brouillon',
                 color: 'gray',
                 progress: 10,
                 description: 'Ticket créé et en attente de traitement',
@@ -153,7 +155,17 @@ const getStatusConfig = (status: string) => {
     }
 };
 
-// ================= CRITICALITY =================
+// ================= HELPERS FORMATAGE HORS COMPOSANT =================
+const formatDelay = (minutes: number | null | undefined) => {
+    if (minutes === null || minutes === undefined) return null;
+
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+
+    if (h > 0) return `${h}h ${m}min`;
+    return `${m}min`;
+};
+
 const getCriticalityColor = (criticality?: string) => {
     switch (criticality?.toLowerCase()) {
         case 'critical':
@@ -188,10 +200,19 @@ export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) 
     const StatusIcon = statusConfig.icon as ComponentType;
 
     const hasActualDuration = ticket.actual_duration !== undefined && ticket.actual_duration !== null;
-    // 🟢 Correction : On affiche la durée réelle si dispo, sinon l'estimée
     const durationToDisplay = hasActualDuration ? ticket.actual_duration : ticket.estimated_duration;
 
-    // ================= HELPERS =================
+    // 🟢 DÉPLACEMENT ET CORRECTION DES CALCULS DE RETARD À L'INTÉRIEUR DU COMPOSANT
+    const normalizedStatus = ticket.status?.toLowerCase();
+    const isLate =
+        ticket.is_late === true &&
+        normalizedStatus !== 'completed' &&
+        normalizedStatus !== 'closed' &&
+        normalizedStatus !== 'draft';
+
+    const showLateDuration = isLate && !!ticket.started_at;
+
+    // ================= HELPERS INTERNES =================
     const getProgressColor = () => {
         if (statusConfig.progress >= 100) return 'green';
         if (statusConfig.progress >= 70) return 'blue';
@@ -273,13 +294,17 @@ export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) 
                                     </Badge>
                                 )}
 
-                                {ticket.is_late &&
-                                    ticket.status !== 'completed' &&
-                                    ticket.status !== 'closed' && (
-                                        <Badge colorScheme="orange" variant="outline">
-                                            En retard
-                                        </Badge>
-                                    )}
+                                {isLate && (
+                                    <Badge colorScheme="orange" variant="outline">
+                                        En retard
+                                    </Badge>
+                                )}
+
+                                {showLateDuration && typeof ticket.late_duration_minutes === 'number' && (
+                                    <Badge colorScheme="red" variant="subtle">
+                                        Retard : {formatDelay(ticket.late_duration_minutes)}
+                                    </Badge>
+                                )}
                             </HStack>
 
                             <Text color="gray.600" fontSize="sm">
@@ -443,7 +468,6 @@ export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) 
                 )}
 
                 {/* TIMELINE */}
-                {/* 🟢 Correction : N'affiche le bloc et le Divider que s'il y a au moins une date */}
                 {(ticket.planned_at || ticket.started_at || ticket.ended_at) && (
                     <>
                         <Divider />

@@ -15,115 +15,267 @@ import {
     ModalBody,
     ModalCloseButton,
     useDisclosure,
+    RadioGroup,
+    Radio,
 } from '@chakra-ui/react';
 
+import { useMemo, useState } from 'react';
+
+
 // ================= TYPES =================
+
+type TicketStatus =
+    | 'draft'
+    | 'planned'
+    | 'in_progress'
+    | 'completed'
+    | 'closed';
+
+type TicketAction =
+    | 'start'
+    | 'complete'
+    | 'close'
+    | 'delete'
+    | 'duplicate'
+    | 'unassign';
+
 interface Ticket {
-    id: string;
+    id: string | number;
     number?: string;
-    status: string;
+    status: TicketStatus;
+    technician_name?: string | null; // Added to handle assignment logic
+
     is_breakdown?: boolean;
-    planned_at?: string;
-    started_at?: string;
-    ended_at?: string;
 
     equipment?: {
         name?: string;
         code?: string;
-        criticality?: string;
     };
 
     intervention_type?: {
+        id?: string | number;
         name?: string;
     };
 }
 
-// ================= STATUS STYLE =================
-const getStatus = (status: string) => {
+type ActionPayload =
+    | {
+        mode?: 'linked' | 'independent';
+        intervention_type_id?: string | number | null;
+    }
+    | {
+        result?: string;
+        reason?: string | null;
+        comment?: string;
+    }
+    | undefined;
+
+interface Props {
+    ticket: Ticket;
+    onBack?: () => void;
+    onAction?: (action: TicketAction, payload?: ActionPayload) => void;
+}
+
+
+// ================= STATE MACHINE =================
+
+const WORKFLOW: Record<TicketStatus, Partial<Record<TicketAction, boolean>>> = {
+    draft: {
+        delete: true,
+        duplicate: true,
+    },
+    planned: {
+        start: true,
+        unassign: true, // L'action est autorisée par le workflow à cet état
+        delete: true,
+        duplicate: true,
+    },
+    in_progress: {
+        complete: true,
+        delete: true,
+        duplicate: true,
+    },
+    completed: {
+        close: true,
+        duplicate: true,
+    },
+    closed: {
+        duplicate: true,
+    },
+};
+
+const can = (status: TicketStatus, action: TicketAction) =>
+    !!WORKFLOW[status]?.[action];
+
+
+// ================= STATUS =================
+
+const getStatus = (status: TicketStatus) => {
     switch (status) {
-        case 'draft':
-            return { label: 'Brouillon', color: 'gray' };
-        case 'planned':
-            return { label: 'Planifié', color: 'purple' };
-        case 'in_progress':
-            return { label: 'En cours', color: 'blue' };
-        case 'completed':
-            return { label: 'Terminé', color: 'green' };
-        case 'closed':
-            return { label: 'Clôturé', color: 'orange' };
-        default:
-            return { label: status, color: 'gray' };
+        case 'draft': return { label: 'Brouillon', color: 'gray' };
+        case 'planned': return { label: 'Planifié', color: 'purple' };
+        case 'in_progress': return { label: 'En cours', color: 'blue' };
+        case 'completed': return { label: 'Terminé', color: 'green' };
+        case 'closed': return { label: 'Clôturé', color: 'orange' };
     }
 };
 
+
 // ================= COMPONENT =================
+
 export default function TicketHeader({
     ticket,
     onBack,
     onAction,
-}: {
-    ticket: Ticket;
-    onBack?: () => void;
-    // Mise à jour de la signature pour passer le mode au parent s'il s'agit d'une duplication
-    onAction?: (action: string, payload?: { mode: 'linked' | 'independent' }) => void;
-}) {
+}: Props) {
+
     const status = getStatus(ticket.status);
 
-    // Hook Chakra UI pour contrôler l'ouverture de la modal
-    const { isOpen, onOpen, onClose } = useDisclosure();
+    // ===== MODALS =====
+    const duplicateModal = useDisclosure();
+    const confirmModal = useDisclosure();
 
-    const handleDuplicateSubmit = (mode: 'linked' | 'independent') => {
-        if (onAction) {
-            onAction('duplicate', { mode });
-        }
-        onClose(); // Ferme la modal après sélection
+    const [duplicateMode, setDuplicateMode] =
+        useState<'linked' | 'independent'>('linked');
+
+    const [pending, setPending] =
+        useState<{ action: TicketAction; payload?: any } | null>(null);
+
+
+    // ================= ACTIONS =================
+
+    const requestAction = (action: TicketAction, payload?: any) => {
+        setPending({ action, payload });
+        confirmModal.onOpen();
     };
 
+    const confirmAction = () => {
+        if (!onAction || !pending) return;
+
+        onAction(pending.action, pending.payload);
+
+        setPending(null);
+        confirmModal.onClose();
+    };
+
+
+    // SPECIAL ACTIONS
+
+    const handleStart = () =>
+        requestAction('start');
+
+    const handleComplete = () =>
+        requestAction('complete', {
+            result: 'ok',
+            comment: 'Terminé depuis header',
+        });
+
+    const handleClose = () =>
+        requestAction('close');
+
+    const handleDelete = () =>
+        requestAction('delete');
+
+    const handleUnassign = () =>
+        requestAction('unassign');
+
+    const handleDuplicate = () =>
+        duplicateModal.onOpen();
+
+    const confirmDuplicate = () => {
+        if (!onAction) return;
+
+        onAction('duplicate', {
+            mode: duplicateMode,
+            intervention_type_id:
+                ticket.intervention_type?.id || null,
+        });
+
+        duplicateModal.onClose();
+    };
+
+
+    // ================= UI ACTIONS (STATE MACHINE) =================
+
+    const actions = useMemo(() => {
+
+        const s = ticket.status;
+
+        // Condition stricte : Doit être autorisé par le workflow ET avoir un technicien d'assigné
+        const showUnassign = can(s, 'unassign') && !!ticket.technician_name;
+
+        return [
+            {
+                key: 'start' as TicketAction,
+                label: 'Démarrer',
+                color: 'blue',
+                show: can(s, 'start'),
+                onClick: handleStart,
+            },
+            {
+                key: 'complete' as TicketAction,
+                label: 'Terminer',
+                color: 'green',
+                show: can(s, 'complete'),
+                onClick: handleComplete,
+            },
+            {
+                key: 'close' as TicketAction,
+                label: 'Clôturer',
+                color: 'orange',
+                show: can(s, 'close'),
+                onClick: handleClose,
+            },
+            {
+                key: 'unassign' as TicketAction,
+                label: 'Désassigner',
+                color: 'red',
+                variant: 'outline', // Optionnel : pour le différencier visuellement
+                show: showUnassign,
+                onClick: handleUnassign,
+            },
+        ].filter(a => a.show);
+
+    }, [ticket.status, ticket.technician_name]);
+
+
+    // ================= RENDER =================
+
     return (
-        <Box
-            bg="white"
-            borderBottom="1px solid"
-            borderColor="gray.100"
-            p={4}
-        >
+        <Box bg="white" borderBottom="1px solid" borderColor="gray.100" p={4}>
+
             <Flex justify="space-between" align="center">
 
-                {/* LEFT INFO */}
+                {/* LEFT */}
                 <VStack align="start" spacing={1}>
-                    <VStack align="flex-start" spacing={1}>
-                        <HStack>
-                            <Text fontSize="lg" fontWeight="bold">
-                                Ticket {ticket.number || 'N° inconnu'}
-                            </Text>
 
-                            <Badge colorScheme={status.color}>
-                                {status.label}
-                            </Badge>
-
-                            {ticket.is_breakdown && (
-                                <Badge colorScheme="red">
-                                    Panne
-                                </Badge>
-                            )}
-                        </HStack>
-
-                        <Text fontSize="sm" color="gray.500">
-                            {ticket.equipment?.name} ({ticket.equipment?.code})
+                    <HStack>
+                        <Text fontSize="lg" fontWeight="bold">
+                            Ticket {ticket.number || ticket.id}
                         </Text>
 
-                        <HStack spacing={2}>
-                            <Text fontSize="sm" fontWeight="medium" color="gray.700">
-                                Type d'intervention:
-                            </Text>
-                            <Text fontSize="sm" color="gray.500">
-                                {ticket.intervention_type?.name || 'Non défini'}
-                            </Text>
-                        </HStack>
-                    </VStack>
+                        <Badge colorScheme={status?.color}>
+                            {status?.label}
+                        </Badge>
+
+                        {ticket.is_breakdown && (
+                            <Badge colorScheme="red">Panne</Badge>
+                        )}
+                    </HStack>
+
+                    <Text fontSize="sm" color="gray.500">
+                        {ticket.equipment?.name || 'Équipement'} ({ticket.equipment?.code || 'N/A'})
+                    </Text>
+
+                    <Text fontSize="sm">
+                        {ticket.intervention_type?.name || 'Type non défini'}
+                    </Text>
+
                 </VStack>
 
+
                 {/* RIGHT ACTIONS */}
-                <HStack spacing={3}>
+                <HStack spacing={3} flexWrap="wrap">
 
                     {onBack && (
                         <Button size="sm" variant="ghost" onClick={onBack}>
@@ -131,125 +283,127 @@ export default function TicketHeader({
                         </Button>
                     )}
 
-                    {/* DUPLICATE BUTTON - Ouvre désormais la modal au clic */}
-                    {ticket.status !== 'draft' && onAction && (
+                    {/* STATIC ACTIONS */}
+                    {can(ticket.status, 'duplicate') && (
                         <Button
                             size="sm"
+                            colorScheme="purple"
                             variant="outline"
-                            colorScheme="gray"
-                            onClick={onOpen}
+                            onClick={handleDuplicate}
                         >
                             Dupliquer
                         </Button>
                     )}
 
-                    {/* DELETE BUTTON - Always visible */}
-                    {onAction && (
+                    {can(ticket.status, 'delete') && (
                         <Button
                             size="sm"
                             colorScheme="red"
                             variant="outline"
-                            onClick={() => onAction('delete')}
+                            onClick={handleDelete}
                         >
                             Supprimer
                         </Button>
                     )}
 
-                    {ticket.status === 'planned' && onAction && (
+                    {/* STATE MACHINE ACTIONS */}
+                    {actions.map(a => (
                         <Button
+                            key={a.key}
                             size="sm"
-                            colorScheme="blue"
-                            onClick={() => onAction('start')}
+                            colorScheme={a.color}
+                            variant={a.key === 'unassign' ? 'outline' : 'solid'}
+                            onClick={a.onClick}
                         >
-                            Démarrer
+                            {a.label}
                         </Button>
-                    )}
-
-                    {ticket.status === 'in_progress' && onAction && (
-                        <Button
-                            size="sm"
-                            colorScheme="green"
-                            onClick={() => onAction('complete')}
-                        >
-                            Terminer
-                        </Button>
-                    )}
-
-                    {ticket.status === 'completed' && onAction && (
-                        <Button
-                            size="sm"
-                            colorScheme="orange"
-                            onClick={() => onAction('close')}
-                        >
-                            Clôturer
-                        </Button>
-                    )}
+                    ))}
 
                 </HStack>
+
             </Flex>
 
             <Divider mt={3} />
 
-            {/* ================= MODAL DE CHOIX DE DUPLICATION ================= */}
-            <Modal isOpen={isOpen} onClose={onClose} isCentered size="md">
-                <ModalOverlay backdropFilter="blur(4px)" />
-                <ModalContent p={2}>
-                    <ModalHeader fontSize="md" fontWeight="bold">
-                        Options de duplication
-                    </ModalHeader>
+
+            {/* ================= DUPLICATION MODAL ================= */}
+            <Modal isOpen={duplicateModal.isOpen} onClose={duplicateModal.onClose} isCentered>
+
+                <ModalOverlay />
+
+                <ModalContent>
+
+                    <ModalHeader>Dupliquer le ticket</ModalHeader>
+
                     <ModalCloseButton />
 
                     <ModalBody>
-                        <VStack spacing={4} align="stretch">
-                            <Text fontSize="sm" color="gray.600">
-                                Choisissez la manière dont vous souhaitez dupliquer le ticket <strong>{ticket.number}</strong> :
-                            </Text>
 
-                            {/* Option 1: Duplication Liée */}
-                            <Box
-                                border="1px solid"
-                                borderColor="gray.200"
-                                borderRadius="md"
-                                p={3}
-                                cursor="pointer"
-                                _hover={{ borderColor: 'blue.400', bg: 'blue.50' }}
-                                onClick={() => handleDuplicateSubmit('linked')}
-                            >
-                                <Text fontWeight="semibold" fontSize="sm" color="blue.700">
-                                    Duplication Liée (Enfant)
-                                </Text>
-                                <Text fontSize="xs" color="gray.500" mt={1}>
-                                    Génère une sous-tâche liée à ce ticket (ex: {ticket.number}_1).
-                                </Text>
-                            </Box>
+                        <RadioGroup
+                            value={duplicateMode}
+                            onChange={(v) => setDuplicateMode(v as any)}
+                        >
 
-                            {/* Option 2: Duplication Indépendante */}
-                            <Box
-                                border="1px solid"
-                                borderColor="gray.200"
-                                borderRadius="md"
-                                p={3}
-                                cursor="pointer"
-                                _hover={{ borderColor: 'purple.400', bg: 'purple.50' }}
-                                onClick={() => handleDuplicateSubmit('independent')}
-                            >
-                                <Text fontWeight="semibold" fontSize="sm" color="purple.700">
-                                    Duplication Indépendante (Nouveau ticket)
-                                </Text>
-                                <Text fontSize="xs" color="gray.500" mt={1}>
-                                    Crée un tout nouveau ticket autonome avec son propre numéro incrémenté. Aucune relation parent-enfant.
-                                </Text>
-                            </Box>
-                        </VStack>
+                            <VStack spacing={3}>
+
+                                <Box borderWidth="1px" p={3} borderRadius="md">
+                                    <Radio value="linked">Ticket lié</Radio>
+                                </Box>
+
+                                <Box borderWidth="1px" p={3} borderRadius="md">
+                                    <Radio value="independent">Indépendant</Radio>
+                                </Box>
+
+                            </VStack>
+
+                        </RadioGroup>
+
                     </ModalBody>
 
                     <ModalFooter>
-                        <Button size="sm" variant="ghost" onClick={onClose}>
+                        <Button variant="ghost" onClick={duplicateModal.onClose}>
                             Annuler
                         </Button>
+
+                        <Button colorScheme="purple" onClick={confirmDuplicate}>
+                            Confirmer
+                        </Button>
                     </ModalFooter>
+
                 </ModalContent>
+
             </Modal>
+
+
+            {/* ================= CONFIRMATION MODAL ================= */}
+            <Modal isOpen={confirmModal.isOpen} onClose={confirmModal.onClose} isCentered>
+
+                <ModalOverlay />
+
+                <ModalContent>
+
+                    <ModalHeader>Confirmation</ModalHeader>
+
+                    <ModalBody>
+                        <Text>
+                            Confirmer l'action : <b>{pending?.action === 'unassign' ? 'Désassigner' : pending?.action}</b> ?
+                        </Text>
+                    </ModalBody>
+
+                    <ModalFooter>
+                        <Button variant="ghost" onClick={confirmModal.onClose}>
+                            Annuler
+                        </Button>
+
+                        <Button colorScheme="red" onClick={confirmAction}>
+                            Confirmer
+                        </Button>
+                    </ModalFooter>
+
+                </ModalContent>
+
+            </Modal>
+
         </Box>
     );
 }

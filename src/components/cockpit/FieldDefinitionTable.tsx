@@ -1,11 +1,39 @@
 import {
-    Box, Flex, VStack, HStack, Button, Text, Input, Select, Switch,
-    Heading, SimpleGrid, IconButton, useToast, Badge, Divider, Stack, useDisclosure
+    Box,
+    Flex,
+    VStack,
+    HStack,
+    Button,
+    Text,
+    Input,
+    Select,
+    Switch,
+    Heading,
+    SimpleGrid,
+    IconButton,
+    useToast,
+    Badge,
+    Divider,
+    Stack,
+    useDisclosure,
 } from '@chakra-ui/react';
-import { useState, useEffect, useRef } from 'react';
-import { FiPlus, FiTrash2, FiArrowUp, FiArrowDown, FiCloudLightning } from 'react-icons/fi';
+
+import { useState, useEffect, useRef, memo, useCallback, useMemo } from 'react';
+
+import {
+    FiPlus,
+    FiTrash2,
+    FiArrowUp,
+    FiArrowDown,
+    FiCloudLightning,
+} from 'react-icons/fi';
+
 import api from '../../api/apiClient';
 import FieldDefinitionModal from './FieldDefinitionModal';
+
+/* ============================================================================
+   TYPES
+============================================================================ */
 
 interface FieldTypes {
     value: string;
@@ -17,10 +45,10 @@ interface InterventionType {
     name: string;
 }
 
-interface Section {
-    id: string | number;
-    title: string;
-    fields: FieldDefinition[];
+interface FieldOption {
+    id: string;
+    value: string;
+    label: string;
 }
 
 interface FieldDefinition {
@@ -30,24 +58,78 @@ interface FieldDefinition {
     required: boolean;
     code: string;
     order?: number;
+    options?: FieldOption[];
+    depends_on_field_id?: string | number | null;
+    depends_on_value?: string | null;
 }
 
-// Aligné à 100% avec les choices de ton modèle Django
+interface Section {
+    id: string | number;
+    title: string;
+    fields: FieldDefinition[];
+}
+
+/* ============================================================================
+   CONSTANTES
+============================================================================ */
+
 const FIELD_TYPES: FieldTypes[] = [
-    { value: "text", label: "Texte" },
-    { value: "textarea", label: "Zone de texte (Multi-lignes)" },
-    { value: "number", label: "Numérique" },
-    { value: "checkbox", label: "Case à cocher" },
-    { value: "date", label: "Date" },
-    { value: "time", label: "Heure" },
-    { value: "datetime", label: "Date & Heure" },
-    { value: "select", label: "Liste déroulante" },
-    { value: "multi_select", label: "Sélection multiple" },
-    { value: "radio", label: "Bouton radio" },
-    { value: "image", label: "Photo Appareil" },
-    { value: "file", label: "Fichier / Doc" },
-    { value: "signature", label: "Signature" },
+    { value: 'text', label: 'Texte' },
+    { value: 'textarea', label: 'Zone de texte' },
+    { value: 'number', label: 'Numérique' },
+    { value: 'checkbox', label: 'Case à cocher' },
+    { value: 'date', label: 'Date' },
+    { value: 'time', label: 'Heure' },
+    { value: 'datetime', label: 'Date & Heure' },
+    { value: 'select', label: 'Liste déroulante' },
+    { value: 'multi_select', label: 'Sélection multiple' },
+    { value: 'radio', label: 'Bouton radio' },
+    { value: 'image', label: 'Photo' },
+    { value: 'file', label: 'Document' },
+    { value: 'signature', label: 'Signature' },
 ];
+
+/* ============================================================================
+   HELPERS
+============================================================================ */
+
+function wouldCreateCycle(
+    fields: FieldDefinition[],
+    sourceFieldId: string | number,
+    targetFieldId: string | number | null
+): boolean {
+    if (!targetFieldId) return false;
+
+    const graph = new Map<string | number, string | number | null>();
+
+    fields.forEach((field) => {
+        graph.set(field.id, field.depends_on_field_id || null);
+    });
+
+    graph.set(sourceFieldId, targetFieldId);
+
+    let current = targetFieldId;
+    const visited = new Set();
+
+    while (current) {
+        if (current === sourceFieldId) {
+            return true;
+        }
+
+        if (visited.has(current)) {
+            break;
+        }
+
+        visited.add(current);
+        current = graph.get(current) || null;
+    }
+
+    return false;
+}
+
+/* ============================================================================
+   MAIN COMPONENT
+============================================================================ */
 
 export default function FieldDefinitionTable() {
     const toast = useToast();
@@ -60,251 +142,355 @@ export default function FieldDefinitionTable() {
 
     const fieldCounterRef = useRef(0);
 
-    const fetchInterventionTypes = () => {
-        api.get('/api/v1/intervention-types/').then(res => {
-            const data = res.data.results || res.data;
-            setInterventionTypes(data);
-            if (data.length > 0) setSelectedTypeId(data[0].id);
-        });
-    };
+    /* =========================================================================
+       FETCH TYPES
+    ========================================================================= */
+    useEffect(() => {
+        api.get('/api/v1/intervention-types/')
+            .then((res) => {
+                const data = res.data.results || res.data;
+                setInterventionTypes(data);
+                if (data.length > 0) {
+                    setSelectedTypeId(data[0].id);
+                }
+            })
+            .catch((err) => {
+                console.error(err);
+            });
+    }, []);
 
-    const fetchSectionsAndFields = () => {
-
-        console.log("CHANGEMENT DE TYPE DÉTECTÉ, ID ACTUEL :", selectedTypeId);
-        // 💡 1. On vide tout de suite l'affichage de droite dès qu'on change de type
+    /* =========================================================================
+       FETCH STRUCTURE
+    ========================================================================= */
+    useEffect(() => {
+        const controller = new AbortController();
         setSections([]);
 
         if (!selectedTypeId) return;
 
-        api.get(`/api/v1/sections/?intervention_type=${selectedTypeId}`).then(res => {
-            const sectionsData = res.data.results || res.data;
+        const fetchStructure = async () => {
+            try {
+                const sectionRes = await api.get(
+                    `/api/v1/sections/?intervention_type=${selectedTypeId}`,
+                    { signal: controller.signal }
+                );
 
-            const promises = sectionsData.map((section: any) =>
-                api.get(`/api/v1/field-definitions/?section_id=${section.id}`)
-                    .then(fieldRes => {
+                const sectionData = sectionRes.data.results || sectionRes.data;
+
+                const completeSections = await Promise.all(
+                    sectionData.map(async (section: any) => {
+                        const fieldRes = await api.get(
+                            `/api/v1/field-definitions/?section_id=${section.id}`,
+                            { signal: controller.signal }
+                        );
+
                         const fields = fieldRes.data.results || fieldRes.data;
+
                         return {
                             id: section.id,
                             title: section.title,
-                            fields: fields.sort((a: any, b: any) => a.order - b.order)
+                            fields: fields.sort(
+                                (a: any, b: any) => (a.order || 0) - (b.order || 0)
+                            ),
                         };
                     })
-            );
--
-            Promise.all(promises).then((completedSections) => {
-                setSections(completedSections);
-            });
-        }).catch(err => {
-            console.error("Erreur lors de la récupération des sections:", err);
-            setSections([]);
-        });
-    };
+                );
 
-    useEffect(() => {
-        fetchInterventionTypes();
-    }, []);
+                setSections(completeSections);
+            } catch (err: any) {
+                if (err.name !== 'CanceledError') {
+                    console.error(err);
+                }
+            }
+        };
 
-    useEffect(() => {
-        fetchSectionsAndFields();
+        fetchStructure();
+        return () => controller.abort();
     }, [selectedTypeId]);
 
-    const addFieldToSectionLocal = (sectionId: string | number) => {
+    /* =========================================================================
+       CALLBACKS
+    ========================================================================= */
+    const addFieldToSectionLocal = useCallback((sectionId: string | number) => {
         fieldCounterRef.current += 1;
-        const tempFieldId = `temp-fld-${Date.now()}-${fieldCounterRef.current}`;
+        const tempId = `temp-fld-${crypto.randomUUID()}`;
 
-        setSections(sections.map(sec => {
-            if (sec.id !== sectionId) return sec;
-            return {
-                ...sec,
-                fields: [...sec.fields, {
-                    id: tempFieldId,
-                    label: "",
-                    field_type: "text",
-                    required: false,
-                    code: `param_${Date.now().toString().slice(-3)}${fieldCounterRef.current}`
-                }]
-            };
-        }));
-    };
+        setSections((prev) =>
+            prev.map((section) => {
+                if (section.id !== sectionId) return section;
 
-    const removeFieldFromSectionLocal = (sectionId: string | number, fieldId: string | number) => {
-        setSections(sections.map(sec => {
-            if (sec.id !== sectionId) return sec;
-            return { ...sec, fields: sec.fields.filter(f => f.id !== fieldId) };
-        }));
-    };
-
-    const updateFieldLocal = (sectionId: string | number, fieldId: string | number, key: keyof FieldDefinition, value: any) => {
-        setSections(sections.map(sec => {
-            if (sec.id !== sectionId) return sec;
-            return {
-                ...sec,
-                fields: sec.fields.map(f => f.id === fieldId ? { ...f, [key]: value } : f)
-            };
-        }));
-    };
-
-    const moveFieldLocal = (sectionId: string | number, index: number, direction: 'up' | 'down') => {
-        const targetIndex = direction === 'up' ? index - 1 : index + 1;
-
-        setSections(sections.map(sec => {
-            if (sec.id !== sectionId) return sec;
-            if (targetIndex < 0 || targetIndex >= sec.fields.length) return sec;
-
-            const updatedFields = [...sec.fields];
-            const temp = updatedFields[index];
-            updatedFields[index] = updatedFields[targetIndex];
-            updatedFields[targetIndex] = temp;
-
-            return { ...sec, fields: updatedFields };
-        }));
-    };
-
-    const removeSectionLocal = async (sectionId: string | number) => {
-        if (!window.confirm("Supprimer cette section ? Tous les champs locaux rattachés seront supprimés.")) return;
-        try {
-            if (!String(sectionId).startsWith('temp-sec-')) {
-                await api.delete(`/api/v1/sections/${sectionId}/`);
-            }
-            setSections(sections.filter(s => s.id !== sectionId));
-            toast({ title: "Section supprimée", status: "success", duration: 2000 });
-        } catch (err) {
-            toast({ title: "Erreur lors de la suppression", status: "error" });
-        }
-    };
-
-    const handleDeploySection = async (section: Section) => {
-        const hasInvalidFields = section.fields.some(f => !f.label.trim() || !f.code.trim());
-        if (hasInvalidFields) {
-            toast({ title: "Champs incomplets", description: "Remplissez l'intitulé et le code API avant de déployer.", status: "warning", duration: 3000 });
-            return;
-        }
-
-        try {
-            setIsDeploying(prev => ({ ...prev, [section.id]: true }));
-
-            const fieldsToDeploy = section.fields.map((field, index) => {
-                const isTempField = String(field.id).startsWith('temp-fld-');
                 return {
-                    ...(isTempField ? {} : { id: field.id }),
-                    label: field.label,
-                    field_type: field.field_type,
-                    required: field.required,
-                    code: field.code,
-                    order: index
+                    ...section,
+                    fields: [
+                        ...section.fields,
+                        {
+                            id: tempId,
+                            label: '',
+                            field_type: 'text',
+                            required: false,
+                            code: `param_${fieldCounterRef.current}`,
+                            options: [],
+                            depends_on_field_id: null,
+                            depends_on_value: null,
+                        },
+                    ],
                 };
-            });
+            })
+        );
+    }, []);
+
+    const removeFieldFromSectionLocal = useCallback(
+        (sectionId: string | number, fieldId: string | number) => {
+            setSections((prev) =>
+                prev.map((section) => {
+                    if (section.id !== sectionId) return section;
+
+                    return {
+                        ...section,
+                        fields: section.fields.filter((field) => field.id !== fieldId),
+                    };
+                })
+            );
+        },
+        []
+    );
+
+    const updateFieldLocal = useCallback(
+        (
+            sectionId: string | number,
+            fieldId: string | number,
+            key: keyof FieldDefinition,
+            value: any
+        ) => {
+            setSections((prev) =>
+                prev.map((section) => {
+                    if (section.id !== sectionId) return section;
+
+                    const currentField = section.fields.find((f) => f.id === fieldId);
+                    if (!currentField) return section;
+
+                    // Protection contre les cycles dynamiques
+                    if (
+                        key === 'depends_on_field_id' &&
+                        wouldCreateCycle(section.fields, fieldId, value)
+                    ) {
+                        return section;
+                    }
+
+                    return {
+                        ...section,
+                        fields: section.fields.map((field) =>
+                            field.id === fieldId
+                                ? {
+                                    ...field,
+                                    [key]: value,
+                                    // Reset la valeur de dépendance si le parent change
+                                    ...(key === 'depends_on_field_id'
+                                        ? { depends_on_value: null }
+                                        : {}),
+                                }
+                                : field
+                        ),
+                    };
+                })
+            );
+        },
+        []
+    );
+
+    const moveFieldLocal = useCallback(
+        (sectionId: string | number, index: number, direction: 'up' | 'down') => {
+            setSections((prev) =>
+                prev.map((section) => {
+                    if (section.id !== sectionId) return section;
+
+                    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+                    if (targetIndex < 0 || targetIndex >= section.fields.length) {
+                        return section;
+                    }
+
+                    const updated = [...section.fields];
+                    [updated[index], updated[targetIndex]] = [
+                        updated[targetIndex],
+                        updated[index],
+                    ];
+
+                    return {
+                        ...section,
+                        fields: updated,
+                    };
+                })
+            );
+        },
+        []
+    );
+
+    /* =========================================================================
+       DEPLOY
+    ========================================================================= */
+    const handleDeploySection = async (section: Section) => {
+        try {
+            setIsDeploying((prev) => ({ ...prev, [section.id]: true }));
+
+            const payload = section.fields.map((field, index) => ({
+                ...(String(field.id).startsWith('temp') ? {} : { id: field.id }),
+                label: field.label,
+                field_type: field.field_type,
+                required: field.required,
+                code: field.code,
+                order: index,
+                depends_on_field_id: field.depends_on_field_id || null,
+                depends_on_value: field.depends_on_value || null,
+                options: ['select', 'multi_select', 'radio'].includes(field.field_type)
+                    ? field.options || []
+                    : [],
+            }));
 
             await api.post('/api/v1/field-definitions/deploy/', {
                 section_id: section.id,
-                fields: fieldsToDeploy
+                fields: payload,
             });
 
-            toast({ title: `Section "${section.title}" synchronisée !`, status: "success", duration: 3000 });
-            fetchSectionsAndFields();
+            toast({
+                title: 'Déploiement réussi',
+                status: 'success',
+                duration: 3000,
+            });
         } catch (err: any) {
-            toast({ title: "Échec du déploiement", description: err.response?.data?.detail || "Erreur de validation", status: "error" });
+            toast({
+                title: 'Erreur déploiement',
+                description: err.response?.data?.detail || 'Erreur inconnue',
+                status: 'error',
+            });
         } finally {
-            setIsDeploying(prev => ({ ...prev, [section.id]: false }));
+            setIsDeploying((prev) => ({ ...prev, [section.id]: false }));
         }
     };
 
     return (
-        <SimpleGrid columns={{ base: 1, lg: 4 }} gap={6} p={{ base: 3, md: 5 }} width="100%">
-
-            {/* PANNEAU GAUCHE */}
-            <Box bg="white" p={4} borderRadius="xl" boxShadow="sm" border="1px solid #eee" h="fit-content">
-                <Heading size="xs" textTransform="uppercase" color="gray.400" mb={4}>
-                    Types d'interventions
+        <SimpleGrid columns={{ base: 1, lg: 4 }} gap={6} p={5}>
+            {/* PANEL GAUCHE */}
+            <Box bg="white" p={4} borderRadius="xl" border="1px solid #eee">
+                <Heading
+                    size="xs"
+                    textTransform="uppercase"
+                    mb={4}
+                    color="gray.500"
+                >
+                    Types d'intervention
                 </Heading>
-                <Stack direction={{ base: "row", lg: "column" }} spacing={2} overflowX={{ base: "auto", lg: "visible" }} pb={{ base: 2, lg: 0 }}>
-                    {interventionTypes.map(type => {
-                        const isSelected = selectedTypeId === type.id;
+
+                <VStack align="stretch">
+                    {interventionTypes.map((type) => {
+                        const active = selectedTypeId === type.id;
                         return (
                             <Box
-                                key={type.id} p={3} borderRadius="lg" cursor="pointer" inlineSize={{ base: "max-content", lg: "auto" }}
-                                bg={isSelected ? "purple.50" : "transparent"}
-                                color={isSelected ? "purple.700" : "gray.700"}
-                                fontWeight={isSelected ? "bold" : "normal"}
-                                _hover={{ bg: "gray.50" }}
+                                key={type.id}
+                                p={3}
+                                borderRadius="lg"
+                                cursor="pointer"
+                                bg={active ? 'purple.50' : 'transparent'}
+                                color={active ? 'purple.700' : 'gray.700'}
+                                fontWeight={active ? 'bold' : 'normal'}
                                 onClick={() => setSelectedTypeId(type.id)}
                             >
                                 {type.name}
                             </Box>
                         );
                     })}
-                </Stack>
+                </VStack>
             </Box>
 
-            {/* WORKSPACE DROITE */}
-            <Box gridColumn={{ base: "span 1", lg: "span 3" }} bg="white" p={{ base: 4, md: 5 }} borderRadius="xl" boxShadow="sm" border="1px solid #eee" width="100%">
-                <Flex direction={{ base: "column", sm: "row" }} justify="space-between" align={{ base: "stretch", sm: "center" }} gap={4} mb={6}>
+            {/* PANEL DROITE */}
+            <Box
+                gridColumn={{ base: 'span 1', lg: 'span 3' }}
+                bg="white"
+                p={5}
+                borderRadius="xl"
+                border="1px solid #eee"
+            >
+                <Flex justify="space-between" align="center" mb={6}>
                     <Box>
-                        <Heading size="md">Champs structurés par section</Heading>
-                        <Text fontSize="xs" color="gray.500">Configurez et déployez vos blocs de rapports de terrain.</Text>
+                        <Heading size="md">Builder intelligent</Heading>
+                        <Text fontSize="sm" color="gray.500">
+                            Champs dynamiques conditionnels
+                        </Text>
                     </Box>
-                    <Button leftIcon={<FiPlus />} size="sm" colorScheme="purple" variant="outline" onClick={onOpen}>
-                        Nouvelle Section
+
+                    <Button
+                        leftIcon={<FiPlus />}
+                        colorScheme="purple"
+                        variant="outline"
+                        size="sm"
+                        onClick={onOpen}
+                    >
+                        Nouvelle section
                     </Button>
                 </Flex>
 
                 <Divider mb={6} />
 
-                <VStack spacing={8} align="stretch">
-                    {sections.length === 0 && (
-                        <Box py={10} textAlign="center" color="gray.400" border="2px dashed #eee" borderRadius="lg">
-                            Aucune section trouvée. Cliquez sur "Nouvelle Section".
-                        </Box>
-                    )}
-
+                <VStack spacing={6} align="stretch">
                     {sections.map((section) => (
-                        <Box key={section.id} p={4} border="1px solid" borderColor="purple.100" borderRadius="xl" bg="white">
+                        <Box
+                            key={section.id}
+                            p={4}
+                            borderRadius="xl"
+                            border="1px solid"
+                            borderColor="purple.100"
+                        >
+                            <Flex justify="space-between" align="center" mb={4}>
+                                <HStack>
+                                    <Text fontWeight="bold" color="purple.700">
+                                        {section.title}
+                                    </Text>
+                                    <Badge colorScheme="purple">
+                                        {section.fields.length} champs
+                                    </Badge>
+                                </HStack>
 
-                            <Flex justify="space-between" align="center" mb={4} bg="purple.50" p={2} borderRadius="lg">
-                                <HStack spacing={3}>
-                                    <Text fontWeight="bold" color="purple.700" fontSize="sm">📂 {section.title}</Text>
-                                    <Badge colorScheme="purple">{section.fields.length} champs</Badge>
-                                </HStack>
-                                <HStack spacing={2}>
-                                    <Button
-                                        leftIcon={<FiCloudLightning />} size="xs" colorScheme="purple"
-                                        isLoading={isDeploying[section.id]} onClick={() => handleDeploySection(section)}
-                                        isDisabled={section.fields.length === 0}
-                                    >
-                                        Déployer la section
-                                    </Button>
-                                    <IconButton aria-label="Supprimer" icon={<FiTrash2 />} size="xs" colorScheme="red" variant="ghost" onClick={() => removeSectionLocal(section.id)} />
-                                </HStack>
+                                <Button
+                                    size="xs"
+                                    colorScheme="purple"
+                                    leftIcon={<FiCloudLightning />}
+                                    isLoading={isDeploying[section.id]}
+                                    onClick={() => handleDeploySection(section)}
+                                >
+                                    Déployer
+                                </Button>
                             </Flex>
 
-                            <VStack spacing={3} align="stretch" mb={4}>
+                            <VStack spacing={3} align="stretch">
                                 {section.fields.map((field, index) => (
-                                    <Stack key={field.id} direction={{ base: "column", md: "row" }} p={3} bg="gray.50" borderRadius="lg" spacing={3} align="center">
-                                        <Badge colorScheme="purple">#{index + 1}</Badge>
-
-                                        <SimpleGrid columns={{ base: 1, sm: 2, md: 4 }} spacing={3} flex={1}>
-                                            <Input size="sm" bg="white" placeholder="Intitulé" value={field.label} onChange={(e) => updateFieldLocal(section.id, field.id, 'label', e.target.value)} />
-                                            <Input size="sm" bg="white" placeholder="Code unique API" value={field.code} onChange={(e) => updateFieldLocal(section.id, field.id, 'code', e.target.value)} />
-                                            <Select size="sm" bg="white" value={field.field_type} onChange={(e) => updateFieldLocal(section.id, field.id, 'field_type', e.target.value)}>
-                                                {FIELD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                                            </Select>
-                                            <Flex align="center" justify="center">
-                                                <Text fontSize="xs" color="gray.500" mr={2}>Obligatoire ?</Text>
-                                                <Switch size="sm" colorScheme="purple" isChecked={field.required} onChange={(e) => updateFieldLocal(section.id, field.id, 'required', e.target.checked)} />
-                                            </Flex>
-                                        </SimpleGrid>
-
-                                        <HStack spacing={1}>
-                                            <IconButton aria-label="Monter" size="xs" icon={<FiArrowUp />} isDisabled={index === 0} onClick={() => moveFieldLocal(section.id, index, 'up')} />
-                                            <IconButton aria-label="Descendre" size="xs" icon={<FiArrowDown />} isDisabled={index === section.fields.length - 1} onClick={() => moveFieldLocal(section.id, index, 'down')} />
-                                            <IconButton aria-label="Supprimer" size="xs" colorScheme="red" variant="ghost" icon={<FiTrash2 />} onClick={() => removeFieldFromSectionLocal(section.id, field.id)} />
-                                        </HStack>
-                                    </Stack>
+                                    <FieldRow
+                                        key={field.id}
+                                        field={field}
+                                        index={index}
+                                        totalFields={section.fields.length}
+                                        siblingFields={section.fields}
+                                        onUpdate={(key, value) =>
+                                            updateFieldLocal(section.id, field.id, key, value)
+                                        }
+                                        onDelete={() =>
+                                            removeFieldFromSectionLocal(section.id, field.id)
+                                        }
+                                        onMove={(direction) =>
+                                            moveFieldLocal(section.id, index, direction)
+                                        }
+                                    />
                                 ))}
                             </VStack>
 
-                            <Button leftIcon={<FiPlus />} size="xs" colorScheme="purple" variant="ghost" onClick={() => addFieldToSectionLocal(section.id)}>
-                                Ajouter un champ à "{section.title}"
+                            <Button
+                                mt={4}
+                                size="xs"
+                                leftIcon={<FiPlus />}
+                                variant="ghost"
+                                colorScheme="purple"
+                                onClick={() => addFieldToSectionLocal(section.id)}
+                            >
+                                Ajouter un champ
                             </Button>
                         </Box>
                     ))}
@@ -316,9 +502,191 @@ export default function FieldDefinitionTable() {
                 onClose={onClose}
                 mode="section"
                 interventionTypeId={selectedTypeId}
-                currentSectionsCount={sections.length} // Passe la taille actuelle pour l'incrément de l'order
-                onSuccess={fetchSectionsAndFields}
+                currentSectionsCount={sections.length}
+                onSuccess={() => setSelectedTypeId(selectedTypeId)}
             />
         </SimpleGrid>
     );
 }
+
+/* ============================================================================
+   FIELD ROW COMPONENT
+============================================================================ */
+
+interface FieldRowProps {
+    field: FieldDefinition;
+    index: number;
+    totalFields: number;
+    siblingFields: FieldDefinition[];
+    onUpdate: (key: keyof FieldDefinition, value: any) => void;
+    onDelete: () => void;
+    onMove: (direction: 'up' | 'down') => void;
+}
+
+const FieldRow = memo(function FieldRow({
+    field,
+    index,
+    totalFields,
+    siblingFields,
+    onUpdate,
+    onDelete,
+    onMove,
+}: FieldRowProps) {
+
+    // Ajout explicite de 'multi_select' dans les types autorisant les options
+    const showOptionsManager = useMemo(
+        () => ['select', 'multi_select', 'radio'].includes(field.field_type),
+        [field.field_type]
+    );
+
+    // ✅ Correction conditions : Inclusion de 'multi_select' comme cible parente éligible
+    const eligibleMasterFields = useMemo(
+        () =>
+            siblingFields.filter(
+                (f) =>
+                    f.id !== field.id &&
+                    ['select', 'multi_select', 'radio', 'checkbox'].includes(f.field_type)
+            ),
+        [siblingFields, field.id]
+    );
+
+    const currentMasterField = useMemo(
+        () => siblingFields.find((f) => f.id === field.depends_on_field_id),
+        [siblingFields, field.depends_on_field_id]
+    );
+
+    return (
+        <VStack
+            align="stretch"
+            p={3}
+            borderRadius="lg"
+            bg="gray.50"
+            border="1px solid #eee"
+        >
+            <Stack direction={{ base: 'column', md: 'row' }} spacing={3}>
+                <Badge colorScheme="purple" alignSelf="center">
+                    #{index + 1}
+                </Badge>
+
+                <SimpleGrid columns={{ base: 1, md: 4 }} spacing={3} flex={1}>
+                    <Input
+                        size="sm"
+                        bg="white"
+                        placeholder="Label"
+                        value={field.label}
+                        onChange={(e) => onUpdate('label', e.target.value)}
+                    />
+
+                    <Input
+                        size="sm"
+                        bg="white"
+                        placeholder="Code API"
+                        value={field.code}
+                        onChange={(e) => onUpdate('code', e.target.value)}
+                    />
+
+                    <Select
+                        size="sm"
+                        bg="white"
+                        value={field.field_type}
+                        onChange={(e) => onUpdate('field_type', e.target.value)}
+                    >
+                        {FIELD_TYPES.map((type) => (
+                            <option key={type.value} value={type.value}>
+                                {type.label}
+                            </option>
+                        ))}
+                    </Select>
+
+                    <Flex align="center">
+                        <Text fontSize="xs" mr={2}>
+                            Obligatoire
+                        </Text>
+                        <Switch
+                            size="sm"
+                            colorScheme="purple"
+                            isChecked={field.required}
+                            onChange={(e) => onUpdate('required', e.target.checked)}
+                        />
+                    </Flex>
+                </SimpleGrid>
+
+                <HStack alignSelf="center">
+                    <IconButton
+                        aria-label="up"
+                        size="xs"
+                        icon={<FiArrowUp />}
+                        isDisabled={index === 0}
+                        onClick={() => onMove('up')}
+                    />
+                    <IconButton
+                        aria-label="down"
+                        size="xs"
+                        icon={<FiArrowDown />}
+                        isDisabled={index === totalFields - 1}
+                        onClick={() => onMove('down')}
+                    />
+                    <IconButton
+                        aria-label="delete"
+                        size="xs"
+                        colorScheme="red"
+                        variant="ghost"
+                        icon={<FiTrash2 />}
+                        onClick={onDelete}
+                    />
+                </HStack>
+            </Stack>
+
+            {/* CONDITIONS D'AFFICHAGE */}
+            <Stack
+                direction={{ base: 'column', md: 'row' }}
+                bg="white"
+                p={2}
+                borderRadius="md"
+                border="1px dashed #ccc"
+                align="center"
+            >
+                <Text fontSize="xs" fontWeight="bold" minW="160px">
+                    Affichage conditionnel
+                </Text>
+
+                <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2} flex={1} w="100%">
+                    <Select
+                        size="xs"
+                        placeholder="Champ parent"
+                        value={field.depends_on_field_id || ''}
+                        onChange={(e) => onUpdate('depends_on_field_id', e.target.value || null)}
+                    >
+                        {eligibleMasterFields.map((master) => (
+                            <option key={master.id} value={master.id}>
+                                {master.label} ({FIELD_TYPES.find(t => t.value === master.field_type)?.label})
+                            </option>
+                        ))}
+                    </Select>
+
+                    {field.depends_on_field_id && (
+                        <Select
+                            size="xs"
+                            placeholder="Sélectionner la valeur déclenchante"
+                            value={field.depends_on_value || ''}
+                            onChange={(e) => onUpdate('depends_on_value', e.target.value)}
+                        >
+                            {currentMasterField?.field_type === 'checkbox' ? (
+                                <>
+                                    <option value="true">Coché</option>
+                                    <option value="false">Décoché</option>
+                                </>
+                            ) : (
+                                currentMasterField?.options?.map((opt) => (
+                                    <option key={opt.id} value={opt.value}>
+                                        {opt.label}
+                                    </option>
+                                ))
+                            )}
+                        </Select>
+                    )}
+                </SimpleGrid>
+            </Stack>
+        </VStack>
+    );
+});
