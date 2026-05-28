@@ -28,6 +28,7 @@ import TicketLogsTab from '../components/tickets/TicketLogsTab';
 import TicketFieldsTab from '../components/tickets/TicketFieldsTab';
 import TicketConsumablesTab from '../components/tickets/TicketConsumablesTab';
 import TicketResultTab from '../components/tickets/TicketResultTab';
+import TicketDowntimeTab from '../components/tickets/TicketDowntimeTab';
 
 // Services
 import {
@@ -318,6 +319,11 @@ export default function TicketDetailPage({
                 content: <TicketResultTab ticket={ticket} onRefresh={refetch} />,
             });
         }
+        items.push({
+            key: 'downtime',
+            label: 'Arrêts machine',
+            content: <TicketDowntimeTab ticket={ticket} onRefresh={refetch} />,
+        });
 
         items.push({
             key: 'logs',
