@@ -1,60 +1,112 @@
 import {
+    Alert,
+    AlertDescription,
+    AlertIcon,
+    AlertTitle,
+    Badge,
     Box,
-    VStack,
-    HStack,
-    Text,
-    Input,
     Button,
-    Table,
-    Thead,
-    Tbody,
-    Tr,
-    Th,
-    Td,
-    useToast,
-    Spinner,
     Center,
-    Select,
     FormControl,
     FormLabel,
+    Heading,
+    HStack,
+    Input,
+    Spinner,
+    Table,
+    Tbody,
+    Td,
+    Text,
+    Th,
+    Thead,
+    Tr,
+    useToast,
+    VStack,
 } from '@chakra-ui/react';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../../api/apiClient';
 
-// ================= TYPES =================
+// ============================================================
+// TYPES
+// ============================================================
+
+type DowntimeStatus =
+    | 'ONGOING'
+    | 'CLOSED'
+    | 'CANCELED';
+
 interface DowntimeLog {
     id: number;
+    equipment: number;
+    ticket: number | null;
+
+    status: DowntimeStatus;
+
     start_time: string;
     end_time: string | null;
-    status: 'ONGOING' | 'CLOSED' | 'CANCELED';
-    reason?: string;
-    equipment: number | string | any;
+
+    reason: string;
+
+    duration_seconds: number;
+    version: number;
 }
 
 interface Ticket {
-    id: string;
-    equipment?: number | string | any;
+    id: number;
+    equipment?: number | { id: number };
+
     downtime_logs?: DowntimeLog[];
 }
 
-// Helper pour obtenir la date du jour au format YYYY-MM-DD
-const getTodayDateString = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+// ============================================================
+// HELPERS
+// ============================================================
+
+const getNowDate = () => {
+    return new Date().toISOString().split('T')[0];
 };
 
-// Helper pour formater la date et l'heure combinées en ISO (sans décalage destructif)
-const combineDateAndTime = (dateStr: string, hoursStr: string, minutesStr: string) => {
-    if (!dateStr) return '';
-    const datetime = new Date(`${dateStr}T${hoursStr.padStart(2, '0')}:${minutesStr.padStart(2, '0')}:00`);
-    return datetime.toISOString();
+const getNowTime = () => {
+    const now = new Date();
+
+    return `${String(now.getHours()).padStart(2, '0')}:${String(
+        now.getMinutes()
+    ).padStart(2, '0')}`;
 };
 
-// ================= COMPONENT =================
+const formatDateTime = (value?: string | null) => {
+    if (!value) return '-';
+
+    return new Date(value).toLocaleString('fr-FR', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+    });
+};
+
+const formatDuration = (seconds?: number) => {
+    if (!seconds || seconds <= 0) {
+        return 'En cours';
+    }
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+
+    if (hours <= 0) {
+        return `${minutes} min`;
+    }
+
+    if (minutes <= 0) {
+        return `${hours} h`;
+    }
+
+    return `${hours} h ${minutes} min`;
+};
+
+// ============================================================
+// COMPONENT
+// ============================================================
+
 export default function TicketDowntimeTab({
     ticket,
     onRefresh,
@@ -63,282 +115,654 @@ export default function TicketDowntimeTab({
     onRefresh: () => void;
 }) {
     const toast = useToast();
-    const [loading, setLoading] = useState(false);
-    const [logs, setLogs] = useState<DowntimeLog[]>(ticket?.downtime_logs || []);
 
-    // Synchronisation locale des logs quand le ticket change ou se rafraîchit
+    // ============================================================
+    // STATES
+    // ============================================================
+
+    const [loading, setLoading] = useState(false);
+
+    const [logs, setLogs] = useState<DowntimeLog[]>(
+        ticket?.downtime_logs || []
+    );
+
+    const [startDate, setStartDate] = useState(getNowDate());
+
+    const [startTime, setStartTime] = useState(getNowTime());
+
+    const [endTime, setEndTime] = useState(getNowTime());
+
+    const [reason, setReason] = useState('');
+
+    const [showCreateForm, setShowCreateForm] = useState(false);
+
+    const [showResolveForm, setShowResolveForm] = useState(false);
+
+    // ============================================================
+    // MEMO
+    // ============================================================
+
+    const ongoingLog = useMemo(() => {
+        return logs.find(
+            (log) => log.status === 'ONGOING'
+        );
+    }, [logs]);
+
+    // ============================================================
+    // EFFECTS
+    // ============================================================
+
     useEffect(() => {
         if (ticket?.downtime_logs) {
             setLogs(ticket.downtime_logs);
         }
     }, [ticket]);
 
-    // ================= FORM STATE =================
-    const [hasDowntime, setHasDowntime] = useState(true);
-    const [selectedDate, setSelectedDate] = useState(getTodayDateString());
+    useEffect(() => {
+        if (!ongoingLog) {
+            setShowResolveForm(false);
+        }
+    }, [ongoingLog]);
 
-    const [startTime, setStartTime] = useState({ hours: '08', minutes: '00' });
-    const [endTime, setEndTime] = useState({ hours: '17', minutes: '00' });
+    // ============================================================
+    // HELPERS
+    // ============================================================
 
-    const [status, setStatus] = useState<'ONGOING' | 'CLOSED' | 'CANCELED'>('CLOSED');
-    const [reason, setReason] = useState('');
+    const getEquipmentId = () => {
+        if (
+            typeof ticket.equipment === 'object' &&
+            ticket.equipment !== null
+        ) {
+            return ticket.equipment.id;
+        }
 
-    const hoursArray = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-    const minutesArray = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+        return ticket.equipment;
+    };
 
-    // ================= ADD DOWNTIME =================
-    const addDowntime = async () => {
-        if (!hasDowntime) return;
+    const showError = (err: any, fallback: string) => {
+        const data = err?.response?.data;
 
-        // 1. Reconstitution des dates au format ISO string
-        const startIso = combineDateAndTime(selectedDate, startTime.hours, startTime.minutes);
-        const endIso = status === 'ONGOING' ? null : combineDateAndTime(selectedDate, endTime.hours, endTime.minutes);
+        let description =
+            data?.detail ||
+            data?.equipment?.[0] ||
+            data?.end_time?.[0] ||
+            data?.start_time?.[0] ||
+            fallback;
 
-        // 2. Validation intelligente : Éviter l'inversion des horaires
-        if (status !== 'ONGOING' && startIso >= (endIso as string)) {
+        toast({
+            title: 'Erreur',
+            description,
+            status: 'error',
+            position: 'top',
+            isClosable: true,
+        });
+    };
+
+    // ============================================================
+    // CREATE DOWNTIME
+    // ============================================================
+
+    const handleStartDowntime = async () => {
+        try {
+            setLoading(true);
+
+            const startIso = new Date(
+                `${startDate}T${startTime}:00`
+            ).toISOString();
+
+            const response = await api.post(
+                '/api/v1/downtime-logs/',
+                {
+                    equipment: getEquipmentId(),
+                    ticket: ticket.id,
+
+                    status: 'ONGOING',
+
+                    start_time: startIso,
+
+                    reason: reason || '',
+                }
+            );
+
+            setLogs((prev) => [
+                response.data,
+                ...prev,
+            ]);
+
+            setReason('');
+            setShowCreateForm(false);
+
             toast({
-                title: 'Incohérence horaire',
-                description: "L'heure de fin doit être strictement supérieure à l'heure de début.",
+                title: 'Downtime démarré',
                 status: 'warning',
                 position: 'top',
                 isClosable: true,
             });
-            return;
-        }
 
-        // 3. Validation intelligente : Anti-double enregistrement (vérification doublon local)
-        const isDuplicate = logs.some(log => {
-            const logStartIso = new Date(log.start_time).toISOString();
-            const currentStartIso = new Date(startIso).toISOString();
-            return logStartIso === currentStartIso && log.status === status;
-        });
-
-        if (isDuplicate) {
-            toast({
-                title: 'Enregistrement dupliqué bloqué',
-                description: 'Un arrêt machine débutant exactement à la même heure existe déjà pour ce ticket.',
-                status: 'error',
-                position: 'top',
-                isClosable: true,
-            });
-            return;
-        }
-
-        try {
-            setLoading(true);
-
-            // Extraction propre du UUID/ID de l'équipement
-            const equipmentId = typeof ticket.equipment === 'object' && ticket.equipment !== null
-                ? (ticket.equipment as any).id
-                : ticket.equipment;
-
-            const response = await api.post(`/api/v1/downtime-logs/`, {
-                ticket: ticket.id,
-                equipment: equipmentId,
-                start_time: startIso,
-                end_time: endIso,
-                status: status,
-                reason: reason,
-            });
-
-            toast({
-                title: 'Arrêt machine enregistré',
-                status: 'success',
-                position: 'top',
-            });
-
-            // Mise à jour immédiate du tableau local avant même le retour du serveur parent
-            if (response.data) {
-                setLogs(prev => [response.data, ...prev]);
-            }
-
-            // Réinitialisation intelligente
-            setStartTime({ hours: '08', minutes: '00' });
-            setEndTime({ hours: '17', minutes: '00' });
-            setReason('');
-
-            // Notification au composant parent
             onRefresh();
-
         } catch (err: any) {
-            toast({
-                title: "Erreur lors de l'enregistrement",
-                description: err.response?.data?.detail || "Vérifiez les données du formulaire ou vos droits d'accès.",
-                status: 'error',
-                position: 'top',
-            });
+            showError(
+                err,
+                "Impossible d'enregistrer le downtime."
+            );
         } finally {
             setLoading(false);
         }
     };
 
+    // ============================================================
+    // CLOSE DOWNTIME
+    // ============================================================
+
+    const handleCloseDowntime = async () => {
+        if (!ongoingLog) return;
+
+        try {
+            setLoading(true);
+
+            const startDateOnly =
+                ongoingLog.start_time.split('T')[0];
+
+            const endIso = new Date(
+                `${startDateOnly}T${endTime}:00`
+            ).toISOString();
+
+            const response = await api.patch(
+                `/api/v1/downtime-logs/${ongoingLog.id}/`,
+                {
+                    status: 'CLOSED',
+
+                    end_time: endIso,
+
+                    reason,
+
+                    version: ongoingLog.version,
+                }
+            );
+
+            setLogs((prev) =>
+                prev.map((log) =>
+                    log.id === ongoingLog.id
+                        ? response.data
+                        : log
+                )
+            );
+
+            setReason('');
+            setShowResolveForm(false);
+
+            toast({
+                title: 'Downtime clôturé',
+                status: 'success',
+                position: 'top',
+                isClosable: true,
+            });
+
+            onRefresh();
+        } catch (err: any) {
+            showError(
+                err,
+                'Impossible de clôturer le downtime.'
+            );
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // ============================================================
+    // CANCEL DOWNTIME
+    // ============================================================
+
+    const handleCancelDowntime = async () => {
+        if (!ongoingLog) return;
+
+        try {
+            setLoading(true);
+
+            const response = await api.patch(
+                `/api/v1/downtime-logs/${ongoingLog.id}/`,
+                {
+                    status: 'CANCELED',
+
+                    end_time: new Date().toISOString(),
+
+                    version: ongoingLog.version,
+                }
+            );
+
+            setLogs((prev) =>
+                prev.map((log) =>
+                    log.id === ongoingLog.id
+                        ? response.data
+                        : log
+                )
+            );
+
+            toast({
+                title: 'Downtime annulé',
+                status: 'info',
+                position: 'top',
+                isClosable: true,
+            });
+
+            onRefresh();
+        } catch (err: any) {
+            showError(
+                err,
+                "Impossible d'annuler le downtime."
+            );
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // ============================================================
+    // LOADING
+    // ============================================================
+
     if (!ticket) {
         return (
             <Center py={10}>
-                <Spinner size="xl" color="red.500" />
+                <Spinner
+                    size="xl"
+                    thickness="4px"
+                    color="blue.500"
+                />
             </Center>
         );
     }
+
+    // ============================================================
+    // RENDER
+    // ============================================================
 
     return (
         <Box p={4}>
             <VStack spacing={6} align="stretch">
 
-                {/* FORMULAIRE D'AJOUT */}
-                <Box borderWidth="1px" p={5} borderRadius="lg" bg="white" shadow="sm">
-                    <VStack spacing={4} align="stretch">
+                {/* ===================================================== */}
+                {/* CONTROL PANEL */}
+                {/* ===================================================== */}
 
-                        <FormControl>
-                            <FormLabel fontSize="sm" fontWeight="bold">Y a-t-il eu un arrêt machine ?</FormLabel>
-                            <Select
-                                value={hasDowntime ? "yes" : "no"}
-                                onChange={(e) => setHasDowntime(e.target.value === "yes")}
+                <Box
+                    bg="white"
+                    borderWidth="1px"
+                    borderRadius="xl"
+                    p={5}
+                    shadow="sm"
+                >
+                    <VStack align="stretch" spacing={5}>
+
+                        <Heading size="sm" color="gray.700">
+                            Gestion du downtime machine
+                        </Heading>
+
+                        {!ongoingLog ? (
+                            <VStack
+                                align="stretch"
+                                spacing={4}
                             >
-                                <option value="yes">Oui, enregistrer un arrêt</option>
-                                <option value="no">Non, aucun arrêt</option>
-                            </Select>
-                        </FormControl>
 
-                        {hasDowntime && (
-                            <>
-                                {/* 1. CALENDRIER DE LA DATE (PLUGUÉ EN HAUT) */}
-                                <FormControl isRequired>
-                                    <FormLabel fontSize="sm" fontWeight="bold">Date de l'arrêt</FormLabel>
-                                    <Input
-                                        type="date"
-                                        value={selectedDate}
-                                        onChange={(e) => setSelectedDate(e.target.value)}
-                                    />
-                                </FormControl>
-
-                                <FormControl>
-                                    <FormLabel fontSize="sm" fontWeight="bold">Statut de l'arrêt</FormLabel>
-                                    <Select
-                                        value={status}
-                                        onChange={(e) => setStatus(e.target.value as any)}
+                                {!showCreateForm ? (
+                                    <Button
+                                        colorScheme="orange"
+                                        size="lg"
+                                        onClick={() => {
+                                            setStartDate(getNowDate());
+                                            setStartTime(getNowTime());
+                                            setShowCreateForm(true);
+                                        }}
                                     >
-                                        <option value="CLOSED">Terminé (Machine réparée)</option>
-                                        <option value="ONGOING">En cours (Panne active)</option>
-                                        <option value="CANCELED">Annulé</option>
-                                    </Select>
-                                </FormControl>
+                                        Déclarer un arrêt machine
+                                    </Button>
+                                ) : (
+                                    <VStack
+                                        align="stretch"
+                                        spacing={4}
+                                        p={4}
+                                        borderWidth="1px"
+                                        borderRadius="lg"
+                                        bg="orange.50"
+                                        borderColor="orange.200"
+                                    >
+                                        <Text
+                                            fontWeight="bold"
+                                            fontSize="sm"
+                                            color="orange.700"
+                                        >
+                                            Début du downtime
+                                        </Text>
 
-                                {/* 2. SÉLECTEURS TEMPS / HEURE / MINUTE (PLUGUÉS EN BAS) */}
-                                <HStack spacing={4} widths="100%" align="stretch">
-                                    <Box borderWidth="1px" p={3} borderRadius="md" bg="gray.50" flex={1}>
-                                        <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>HEURE DE DÉBUT</Text>
-                                        <HStack>
-                                            <Select
-                                                value={startTime.hours}
-                                                onChange={(e) => setStartTime({ ...startTime, hours: e.target.value })}
-                                                bg="white"
-                                                size="sm"
-                                            >
-                                                {hoursArray.map(h => <option key={h} value={h}>{h} h</option>)}
-                                            </Select>
-                                            <Text>:</Text>
-                                            <Select
-                                                value={startTime.minutes}
-                                                onChange={(e) => setStartTime({ ...startTime, minutes: e.target.value })}
-                                                bg="white"
-                                                size="sm"
-                                            >
-                                                {minutesArray.map(m => <option key={m} value={m}>{m} min</option>)}
-                                            </Select>
+                                        <HStack spacing={4}>
+                                            <FormControl isRequired>
+                                                <FormLabel fontSize="xs">
+                                                    Date
+                                                </FormLabel>
+
+                                                <Input
+                                                    type="date"
+                                                    bg="white"
+                                                    value={startDate}
+                                                    onChange={(e) =>
+                                                        setStartDate(
+                                                            e.target
+                                                                .value
+                                                        )
+                                                    }
+                                                />
+                                            </FormControl>
+
+                                            <FormControl isRequired>
+                                                <FormLabel fontSize="xs">
+                                                    Heure
+                                                </FormLabel>
+
+                                                <Input
+                                                    type="time"
+                                                    bg="white"
+                                                    value={startTime}
+                                                    onChange={(e) =>
+                                                        setStartTime(
+                                                            e.target
+                                                                .value
+                                                        )
+                                                    }
+                                                />
+                                            </FormControl>
                                         </HStack>
+
+                                        <FormControl>
+                                            <FormLabel fontSize="xs">
+                                                Cause initiale
+                                            </FormLabel>
+
+                                            <Input
+                                                bg="white"
+                                                placeholder="Ex: Surchauffe, coupure, bourrage..."
+                                                value={reason}
+                                                onChange={(e) =>
+                                                    setReason(
+                                                        e.target
+                                                            .value
+                                                    )
+                                                }
+                                            />
+                                        </FormControl>
+
+                                        <HStack justify="flex-end">
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() =>
+                                                    setShowCreateForm(
+                                                        false
+                                                    )
+                                                }
+                                            >
+                                                Retour
+                                            </Button>
+
+                                            <Button
+                                                size="sm"
+                                                colorScheme="orange"
+                                                isLoading={loading}
+                                                onClick={
+                                                    handleStartDowntime
+                                                }
+                                            >
+                                                Démarrer le downtime
+                                            </Button>
+                                        </HStack>
+                                    </VStack>
+                                )}
+                            </VStack>
+                        ) : (
+                            <VStack
+                                align="stretch"
+                                spacing={4}
+                            >
+                                <Alert
+                                    status="warning"
+                                    borderRadius="lg"
+                                    variant="subtle"
+                                >
+                                    <AlertIcon />
+
+                                    <Box flex="1">
+                                        <AlertTitle>
+                                            Downtime actif
+                                        </AlertTitle>
+
+                                        <AlertDescription
+                                            fontSize="sm"
+                                        >
+                                            Début :
+                                            {' '}
+                                            {formatDateTime(
+                                                ongoingLog.start_time
+                                            )}
+                                        </AlertDescription>
                                     </Box>
 
-                                    {status !== 'ONGOING' && (
-                                        <Box borderWidth="1px" p={3} borderRadius="md" bg="gray.50" flex={1}>
-                                            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>HEURE DE FIN</Text>
-                                            <HStack>
-                                                <Select
-                                                    value={endTime.hours}
-                                                    onChange={(e) => setEndTime({ ...endTime, hours: e.target.value })}
-                                                    bg="white"
-                                                    size="sm"
-                                                >
-                                                    {hoursArray.map(h => <option key={h} value={h}>{h} h</option>)}
-                                                </Select>
-                                                <Text>:</Text>
-                                                <Select
-                                                    value={endTime.minutes}
-                                                    onChange={(e) => setEndTime({ ...endTime, minutes: e.target.value })}
-                                                    bg="white"
-                                                    size="sm"
-                                                >
-                                                    {minutesArray.map(m => <option key={m} value={m}>{m} min</option>)}
-                                                </Select>
-                                            </HStack>
-                                        </Box>
-                                    )}
-                                </HStack>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        colorScheme="gray"
+                                        isLoading={loading}
+                                        onClick={
+                                            handleCancelDowntime
+                                        }
+                                    >
+                                        Annuler
+                                    </Button>
+                                </Alert>
 
-                                <FormControl>
-                                    <FormLabel fontSize="sm" fontWeight="bold">Cause de la panne</FormLabel>
-                                    <Input
-                                        placeholder="Ex: Surchauffe moteur, coupure différentiel, maintenance préventive..."
-                                        value={reason}
-                                        onChange={(e) => setReason(e.target.value)}
-                                    />
-                                </FormControl>
+                                {!showResolveForm ? (
+                                    <Button
+                                        colorScheme="green"
+                                        size="lg"
+                                        onClick={() => {
+                                            setEndTime(
+                                                getNowTime()
+                                            );
 
-                                <Button
-                                    colorScheme="red"
-                                    onClick={addDowntime}
-                                    isLoading={loading}
-                                    isDisabled={loading || !selectedDate}
-                                    mt={2}
-                                >
-                                    Ajouter l'arrêt machine
-                                </Button>
-                            </>
+                                            setShowResolveForm(
+                                                true
+                                            );
+                                        }}
+                                    >
+                                        Signaler la remise en marche
+                                    </Button>
+                                ) : (
+                                    <VStack
+                                        align="stretch"
+                                        spacing={4}
+                                        p={4}
+                                        borderWidth="1px"
+                                        borderRadius="lg"
+                                        bg="green.50"
+                                    >
+                                        <Text
+                                            fontWeight="bold"
+                                            fontSize="sm"
+                                            color="green.700"
+                                        >
+                                            Clôture du downtime
+                                        </Text>
+
+                                        <FormControl isRequired>
+                                            <FormLabel fontSize="xs">
+                                                Heure de redémarrage
+                                            </FormLabel>
+
+                                            <Input
+                                                type="time"
+                                                bg="white"
+                                                value={endTime}
+                                                onChange={(e) =>
+                                                    setEndTime(
+                                                        e.target
+                                                            .value
+                                                    )
+                                                }
+                                            />
+                                        </FormControl>
+
+                                        <FormControl>
+                                            <FormLabel fontSize="xs">
+                                                Cause / diagnostic
+                                            </FormLabel>
+
+                                            <Input
+                                                bg="white"
+                                                placeholder="Ex: moteur remplacé, réarmement thermique..."
+                                                value={reason}
+                                                onChange={(e) =>
+                                                    setReason(
+                                                        e.target
+                                                            .value
+                                                    )
+                                                }
+                                            />
+                                        </FormControl>
+
+                                        <HStack justify="flex-end">
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() =>
+                                                    setShowResolveForm(
+                                                        false
+                                                    )
+                                                }
+                                            >
+                                                Retour
+                                            </Button>
+
+                                            <Button
+                                                size="sm"
+                                                colorScheme="green"
+                                                isLoading={loading}
+                                                onClick={
+                                                    handleCloseDowntime
+                                                }
+                                            >
+                                                Clôturer
+                                            </Button>
+                                        </HStack>
+                                    </VStack>
+                                )}
+                            </VStack>
                         )}
                     </VStack>
                 </Box>
 
-                {/* TABLEAU DES ENREGISTREMENTS CORRIGÉ */}
-                <Box borderWidth="1px" borderRadius="lg" overflow="hidden" bg="white" shadow="sm">
-                    <Table size="sm">
-                        <Thead bg="gray.100">
+                {/* ===================================================== */}
+                {/* HISTORY */}
+                {/* ===================================================== */}
+
+                <Box
+                    bg="white"
+                    borderWidth="1px"
+                    borderRadius="xl"
+                    overflow="hidden"
+                    shadow="sm"
+                >
+                    <Table size="md">
+
+                        <Thead bg="gray.50">
                             <Tr>
                                 <Th>Début</Th>
                                 <Th>Fin</Th>
                                 <Th>Durée</Th>
-                                <Th>Cause / Raison</Th>
+                                <Th>Statut</Th>
+                                <Th>Cause</Th>
                             </Tr>
                         </Thead>
-                        <Tbody>
-                            {logs && logs.length > 0 ? (
-                                logs.map((d) => {
-                                    const start = new Date(d.start_time);
-                                    const end = d.end_time ? new Date(d.end_time) : null;
-                                    const duration = end
-                                        ? (end.getTime() - start.getTime()) / 60000
-                                        : null;
 
-                                    return (
-                                        <Tr key={d.id || d.start_time}>
-                                            <Td fontSize="sm">
-                                                {start.toLocaleString('fr-FR')}
-                                            </Td>
-                                            <Td fontSize="sm">
-                                                {end ? end.toLocaleString('fr-FR') : <Text as="span" color="orange.500" fontWeight="bold">En cours</Text>}
-                                            </Td>
-                                            <Td fontWeight="bold">
-                                                {duration !== null
-                                                    ? `${duration.toFixed(0)} min`
-                                                    : 'En cours'}
-                                            </Td>
-                                            <Td>{d.reason || '-'}</Td>
-                                        </Tr>
-                                    );
-                                })
+                        <Tbody>
+                            {logs.length > 0 ? (
+                                logs.map((log) => (
+                                    <Tr
+                                        key={log.id}
+                                        _hover={{
+                                            bg: 'gray.50',
+                                        }}
+                                    >
+                                        <Td fontSize="sm">
+                                            {formatDateTime(
+                                                log.start_time
+                                            )}
+                                        </Td>
+
+                                        <Td fontSize="sm">
+                                            {formatDateTime(
+                                                log.end_time
+                                            )}
+                                        </Td>
+
+                                        <Td
+                                            fontWeight="semibold"
+                                            color="gray.700"
+                                        >
+                                            {formatDuration(
+                                                log.duration_seconds
+                                            )}
+                                        </Td>
+
+                                        <Td>
+                                            <Badge
+                                                borderRadius="md"
+                                                variant="subtle"
+                                                colorScheme={
+                                                    log.status ===
+                                                        'CLOSED'
+                                                        ? 'green'
+                                                        : log.status ===
+                                                            'ONGOING'
+                                                            ? 'orange'
+                                                            : 'gray'
+                                                }
+                                            >
+                                                {log.status ===
+                                                    'ONGOING'
+                                                    ? 'En cours'
+                                                    : log.status ===
+                                                        'CLOSED'
+                                                        ? 'Clôturé'
+                                                        : 'Annulé'}
+                                            </Badge>
+                                        </Td>
+
+                                        <Td
+                                            maxW="250px"
+                                            fontSize="sm"
+                                            color="gray.600"
+                                        >
+                                            {log.reason || (
+                                                <Text
+                                                    as="span"
+                                                    color="gray.400"
+                                                    fontStyle="italic"
+                                                >
+                                                    Aucune raison
+                                                </Text>
+                                            )}
+                                        </Td>
+                                    </Tr>
+                                ))
                             ) : (
                                 <Tr>
-                                    <Td colSpan={4} textAlign="center" py={6}>
-                                        <Text fontSize="sm" color="gray.500">
-                                            Aucun temps d'arrêt enregistré pour ce ticket.
+                                    <Td
+                                        colSpan={5}
+                                        textAlign="center"
+                                        py={8}
+                                    >
+                                        <Text
+                                            fontSize="sm"
+                                            color="gray.400"
+                                        >
+                                            Aucun downtime enregistré.
                                         </Text>
                                     </Td>
                                 </Tr>
@@ -346,7 +770,6 @@ export default function TicketDowntimeTab({
                         </Tbody>
                     </Table>
                 </Box>
-
             </VStack>
         </Box>
     );
