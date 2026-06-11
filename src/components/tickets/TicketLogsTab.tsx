@@ -14,6 +14,7 @@ import {
 } from '@chakra-ui/react';
 
 import { useEffect, useMemo, useState } from 'react';
+import { formatDateTime } from '../../utils/userUtils';
 import api from '../../api/apiClient';
 
 // ================= TYPES =================
@@ -36,18 +37,6 @@ interface Ticket {
 }
 
 // ================= HELPERS =================
-const formatDate = (date?: string) => {
-    if (!date) return '-';
-
-    const parsed = new Date(date);
-
-    if (isNaN(parsed.getTime())) return '-';
-
-    return parsed.toLocaleString('fr-FR', {
-        dateStyle: 'short',
-        timeStyle: 'short',
-    });
-};
 
 const getActionColor = (action: string) => {
     switch (action) {
@@ -221,7 +210,7 @@ export default function TicketLogsTab({
 
                                         {/* DATE */}
                                         <Td fontSize="sm">
-                                            {formatDate(log.created_at)}
+                                            {formatDateTime(log.created_at)}
                                         </Td>
 
                                         {/* UTILISATEUR */}

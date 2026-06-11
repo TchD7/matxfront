@@ -31,23 +31,16 @@ import api from '../../api/apiClient';
 // TYPES
 // ============================================================
 
-type DowntimeStatus =
-    | 'ONGOING'
-    | 'CLOSED'
-    | 'CANCELED';
+type DowntimeStatus = 'ONGOING' | 'CLOSED' | 'CANCELED';
 
 interface DowntimeLog {
     id: number;
     equipment: number;
     ticket: number | null;
-
     status: DowntimeStatus;
-
     start_time: string;
     end_time: string | null;
-
     reason: string;
-
     duration_seconds: number;
     version: number;
 }
@@ -55,7 +48,6 @@ interface DowntimeLog {
 interface Ticket {
     id: number;
     equipment?: number | { id: number };
-
     downtime_logs?: DowntimeLog[];
 }
 
@@ -63,13 +55,10 @@ interface Ticket {
 // HELPERS
 // ============================================================
 
-const getNowDate = () => {
-    return new Date().toISOString().split('T')[0];
-};
+const getNowDate = () => new Date().toISOString().split('T')[0];
 
 const getNowTime = () => {
     const now = new Date();
-
     return `${String(now.getHours()).padStart(2, '0')}:${String(
         now.getMinutes()
     ).padStart(2, '0')}`;
@@ -77,7 +66,6 @@ const getNowTime = () => {
 
 const formatDateTime = (value?: string | null) => {
     if (!value) return '-';
-
     return new Date(value).toLocaleString('fr-FR', {
         dateStyle: 'short',
         timeStyle: 'short',
@@ -88,19 +76,16 @@ const formatDuration = (seconds?: number) => {
     if (!seconds || seconds <= 0) {
         return 'En cours';
     }
-
-    const hours = Math.floor(seconds / 3600);
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
 
-    if (hours <= 0) {
-        return `${minutes} min`;
-    }
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days} j`);
+    if (hours > 0) parts.push(`${hours} h`);
+    if (minutes > 0 || parts.length === 0) parts.push(`${minutes} min`);
 
-    if (minutes <= 0) {
-        return `${hours} h`;
-    }
-
-    return `${hours} h ${minutes} min`;
+    return parts.join(' ');
 };
 
 // ============================================================
@@ -121,21 +106,21 @@ export default function TicketDowntimeTab({
     // ============================================================
 
     const [loading, setLoading] = useState(false);
+    const [logs, setLogs] = useState<DowntimeLog[]>(ticket?.downtime_logs || []);
 
-    const [logs, setLogs] = useState<DowntimeLog[]>(
-        ticket?.downtime_logs || []
-    );
-
+    // États pour la création
     const [startDate, setStartDate] = useState(getNowDate());
-
     const [startTime, setStartTime] = useState(getNowTime());
 
+    // États pour la clôture (gèrent maintenant les pannes de plusieurs jours)
+    const [endDate, setEndDate] = useState(getNowDate());
     const [endTime, setEndTime] = useState(getNowTime());
 
-    const [reason, setReason] = useState('');
+    // États distincts pour éviter les conflits entre formulaires
+    const [createReason, setCreateReason] = useState('');
+    const [closeReason, setCloseReason] = useState('');
 
     const [showCreateForm, setShowCreateForm] = useState(false);
-
     const [showResolveForm, setShowResolveForm] = useState(false);
 
     // ============================================================
@@ -143,9 +128,7 @@ export default function TicketDowntimeTab({
     // ============================================================
 
     const ongoingLog = useMemo(() => {
-        return logs.find(
-            (log) => log.status === 'ONGOING'
-        );
+        return logs.find((log) => log.status === 'ONGOING');
     }, [logs]);
 
     // ============================================================
@@ -154,7 +137,10 @@ export default function TicketDowntimeTab({
 
     useEffect(() => {
         if (ticket?.downtime_logs) {
-            setLogs(ticket.downtime_logs);
+            const sortedLogs = [...ticket.downtime_logs].sort(
+                (a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
+            );
+            setLogs(sortedLogs);
         }
     }, [ticket]);
 
@@ -169,19 +155,14 @@ export default function TicketDowntimeTab({
     // ============================================================
 
     const getEquipmentId = () => {
-        if (
-            typeof ticket.equipment === 'object' &&
-            ticket.equipment !== null
-        ) {
+        if (typeof ticket.equipment === 'object' && ticket.equipment !== null) {
             return ticket.equipment.id;
         }
-
         return ticket.equipment;
     };
 
     const showError = (err: any, fallback: string) => {
         const data = err?.response?.data;
-
         let description =
             data?.detail ||
             data?.equipment?.[0] ||
@@ -205,31 +186,18 @@ export default function TicketDowntimeTab({
     const handleStartDowntime = async () => {
         try {
             setLoading(true);
+            const startIso = new Date(`${startDate}T${startTime}:00`).toISOString();
 
-            const startIso = new Date(
-                `${startDate}T${startTime}:00`
-            ).toISOString();
+            const response = await api.post('/api/v1/downtime-logs/', {
+                equipment: getEquipmentId(),
+                ticket: ticket.id,
+                status: 'ONGOING',
+                start_time: startIso,
+                reason: createReason || '',
+            });
 
-            const response = await api.post(
-                '/api/v1/downtime-logs/',
-                {
-                    equipment: getEquipmentId(),
-                    ticket: ticket.id,
-
-                    status: 'ONGOING',
-
-                    start_time: startIso,
-
-                    reason: reason || '',
-                }
-            );
-
-            setLogs((prev) => [
-                response.data,
-                ...prev,
-            ]);
-
-            setReason('');
+            setLogs((prev) => [response.data, ...prev]);
+            setCreateReason('');
             setShowCreateForm(false);
 
             toast({
@@ -241,10 +209,7 @@ export default function TicketDowntimeTab({
 
             onRefresh();
         } catch (err: any) {
-            showError(
-                err,
-                "Impossible d'enregistrer le downtime."
-            );
+            showError(err, "Impossible d'enregistrer le downtime.");
         } finally {
             setLoading(false);
         }
@@ -259,36 +224,21 @@ export default function TicketDowntimeTab({
 
         try {
             setLoading(true);
+            // Construit la date de fin exacte sélectionnée dans l'interface
+            const endIso = new Date(`${endDate}T${endTime}:00`).toISOString();
 
-            const startDateOnly =
-                ongoingLog.start_time.split('T')[0];
-
-            const endIso = new Date(
-                `${startDateOnly}T${endTime}:00`
-            ).toISOString();
-
-            const response = await api.patch(
-                `/api/v1/downtime-logs/${ongoingLog.id}/`,
-                {
-                    status: 'CLOSED',
-
-                    end_time: endIso,
-
-                    reason,
-
-                    version: ongoingLog.version,
-                }
-            );
+            const response = await api.patch(`/api/v1/downtime-logs/${ongoingLog.id}/`, {
+                status: 'CLOSED',
+                end_time: endIso,
+                reason: closeReason || ongoingLog.reason,
+                version: ongoingLog.version,
+            });
 
             setLogs((prev) =>
-                prev.map((log) =>
-                    log.id === ongoingLog.id
-                        ? response.data
-                        : log
-                )
+                prev.map((log) => (log.id === ongoingLog.id ? response.data : log))
             );
 
-            setReason('');
+            setCloseReason('');
             setShowResolveForm(false);
 
             toast({
@@ -300,10 +250,7 @@ export default function TicketDowntimeTab({
 
             onRefresh();
         } catch (err: any) {
-            showError(
-                err,
-                'Impossible de clôturer le downtime.'
-            );
+            showError(err, 'Impossible de clôturer le downtime.');
         } finally {
             setLoading(false);
         }
@@ -318,24 +265,14 @@ export default function TicketDowntimeTab({
 
         try {
             setLoading(true);
-
-            const response = await api.patch(
-                `/api/v1/downtime-logs/${ongoingLog.id}/`,
-                {
-                    status: 'CANCELED',
-
-                    end_time: new Date().toISOString(),
-
-                    version: ongoingLog.version,
-                }
-            );
+            const response = await api.patch(`/api/v1/downtime-logs/${ongoingLog.id}/`, {
+                status: 'CANCELED',
+                end_time: new Date().toISOString(),
+                version: ongoingLog.version,
+            });
 
             setLogs((prev) =>
-                prev.map((log) =>
-                    log.id === ongoingLog.id
-                        ? response.data
-                        : log
-                )
+                prev.map((log) => (log.id === ongoingLog.id ? response.data : log))
             );
 
             toast({
@@ -347,62 +284,32 @@ export default function TicketDowntimeTab({
 
             onRefresh();
         } catch (err: any) {
-            showError(
-                err,
-                "Impossible d'annuler le downtime."
-            );
+            showError(err, "Impossible d'annuler le downtime.");
         } finally {
             setLoading(false);
         }
     };
 
-    // ============================================================
-    // LOADING
-    // ============================================================
-
     if (!ticket) {
         return (
             <Center py={10}>
-                <Spinner
-                    size="xl"
-                    thickness="4px"
-                    color="blue.500"
-                />
+                <Spinner size="xl" thickness="4px" color="blue.500" />
             </Center>
         );
     }
 
-    // ============================================================
-    // RENDER
-    // ============================================================
-
     return (
         <Box p={4}>
             <VStack spacing={6} align="stretch">
-
-                {/* ===================================================== */}
                 {/* CONTROL PANEL */}
-                {/* ===================================================== */}
-
-                <Box
-                    bg="white"
-                    borderWidth="1px"
-                    borderRadius="xl"
-                    p={5}
-                    shadow="sm"
-                >
+                <Box bg="white" borderWidth="1px" borderRadius="xl" p={5} shadow="sm">
                     <VStack align="stretch" spacing={5}>
-
                         <Heading size="sm" color="gray.700">
                             Gestion du downtime machine
                         </Heading>
 
                         {!ongoingLog ? (
-                            <VStack
-                                align="stretch"
-                                spacing={4}
-                            >
-
+                            <VStack align="stretch" spacing={4}>
                                 {!showCreateForm ? (
                                     <Button
                                         colorScheme="orange"
@@ -425,67 +332,39 @@ export default function TicketDowntimeTab({
                                         bg="orange.50"
                                         borderColor="orange.200"
                                     >
-                                        <Text
-                                            fontWeight="bold"
-                                            fontSize="sm"
-                                            color="orange.700"
-                                        >
+                                        <Text fontWeight="bold" fontSize="sm" color="orange.700">
                                             Début du downtime
                                         </Text>
 
                                         <HStack spacing={4}>
                                             <FormControl isRequired>
-                                                <FormLabel fontSize="xs">
-                                                    Date
-                                                </FormLabel>
-
+                                                <FormLabel fontSize="xs">Date</FormLabel>
                                                 <Input
                                                     type="date"
                                                     bg="white"
                                                     value={startDate}
-                                                    onChange={(e) =>
-                                                        setStartDate(
-                                                            e.target
-                                                                .value
-                                                        )
-                                                    }
+                                                    onChange={(e) => setStartDate(e.target.value)}
                                                 />
                                             </FormControl>
 
                                             <FormControl isRequired>
-                                                <FormLabel fontSize="xs">
-                                                    Heure
-                                                </FormLabel>
-
+                                                <FormLabel fontSize="xs">Heure</FormLabel>
                                                 <Input
                                                     type="time"
                                                     bg="white"
                                                     value={startTime}
-                                                    onChange={(e) =>
-                                                        setStartTime(
-                                                            e.target
-                                                                .value
-                                                        )
-                                                    }
+                                                    onChange={(e) => setStartTime(e.target.value)}
                                                 />
                                             </FormControl>
                                         </HStack>
 
                                         <FormControl>
-                                            <FormLabel fontSize="xs">
-                                                Cause initiale
-                                            </FormLabel>
-
+                                            <FormLabel fontSize="xs">Cause initiale</FormLabel>
                                             <Input
                                                 bg="white"
                                                 placeholder="Ex: Surchauffe, coupure, bourrage..."
-                                                value={reason}
-                                                onChange={(e) =>
-                                                    setReason(
-                                                        e.target
-                                                            .value
-                                                    )
-                                                }
+                                                value={createReason}
+                                                onChange={(e) => setCreateReason(e.target.value)}
                                             />
                                         </FormControl>
 
@@ -493,22 +372,15 @@ export default function TicketDowntimeTab({
                                             <Button
                                                 size="sm"
                                                 variant="ghost"
-                                                onClick={() =>
-                                                    setShowCreateForm(
-                                                        false
-                                                    )
-                                                }
+                                                onClick={() => setShowCreateForm(false)}
                                             >
                                                 Retour
                                             </Button>
-
                                             <Button
                                                 size="sm"
                                                 colorScheme="orange"
                                                 isLoading={loading}
-                                                onClick={
-                                                    handleStartDowntime
-                                                }
+                                                onClick={handleStartDowntime}
                                             >
                                                 Démarrer le downtime
                                             </Button>
@@ -517,41 +389,21 @@ export default function TicketDowntimeTab({
                                 )}
                             </VStack>
                         ) : (
-                            <VStack
-                                align="stretch"
-                                spacing={4}
-                            >
-                                <Alert
-                                    status="warning"
-                                    borderRadius="lg"
-                                    variant="subtle"
-                                >
+                            <VStack align="stretch" spacing={4}>
+                                <Alert status="warning" borderRadius="lg" variant="subtle">
                                     <AlertIcon />
-
                                     <Box flex="1">
-                                        <AlertTitle>
-                                            Downtime actif
-                                        </AlertTitle>
-
-                                        <AlertDescription
-                                            fontSize="sm"
-                                        >
-                                            Début :
-                                            {' '}
-                                            {formatDateTime(
-                                                ongoingLog.start_time
-                                            )}
+                                        <AlertTitle>Downtime actif</AlertTitle>
+                                        <AlertDescription fontSize="sm">
+                                            Début : {formatDateTime(ongoingLog.start_time)}
                                         </AlertDescription>
                                     </Box>
-
                                     <Button
                                         size="sm"
                                         variant="outline"
                                         colorScheme="gray"
                                         isLoading={loading}
-                                        onClick={
-                                            handleCancelDowntime
-                                        }
+                                        onClick={handleCancelDowntime}
                                     >
                                         Annuler
                                     </Button>
@@ -562,13 +414,10 @@ export default function TicketDowntimeTab({
                                         colorScheme="green"
                                         size="lg"
                                         onClick={() => {
-                                            setEndTime(
-                                                getNowTime()
-                                            );
-
-                                            setShowResolveForm(
-                                                true
-                                            );
+                                            setEndDate(getNowDate());
+                                            setEndTime(getNowTime());
+                                            setCloseReason(ongoingLog.reason || '');
+                                            setShowResolveForm(true);
                                         }}
                                     >
                                         Signaler la remise en marche
@@ -581,48 +430,42 @@ export default function TicketDowntimeTab({
                                         borderWidth="1px"
                                         borderRadius="lg"
                                         bg="green.50"
+                                        borderColor="green.200"
                                     >
-                                        <Text
-                                            fontWeight="bold"
-                                            fontSize="sm"
-                                            color="green.700"
-                                        >
+                                        <Text fontWeight="bold" fontSize="sm" color="green.700">
                                             Clôture du downtime
                                         </Text>
 
-                                        <FormControl isRequired>
-                                            <FormLabel fontSize="xs">
-                                                Heure de redémarrage
-                                            </FormLabel>
+                                        {/* Modifié pour permettre le choix de la date de clôture */}
+                                        <HStack spacing={4}>
+                                            <FormControl isRequired>
+                                                <FormLabel fontSize="xs">Date de redémarrage</FormLabel>
+                                                <Input
+                                                    type="date"
+                                                    bg="white"
+                                                    value={endDate}
+                                                    onChange={(e) => setEndDate(e.target.value)}
+                                                />
+                                            </FormControl>
 
-                                            <Input
-                                                type="time"
-                                                bg="white"
-                                                value={endTime}
-                                                onChange={(e) =>
-                                                    setEndTime(
-                                                        e.target
-                                                            .value
-                                                    )
-                                                }
-                                            />
-                                        </FormControl>
+                                            <FormControl isRequired>
+                                                <FormLabel fontSize="xs">Heure de redémarrage</FormLabel>
+                                                <Input
+                                                    type="time"
+                                                    bg="white"
+                                                    value={endTime}
+                                                    onChange={(e) => setEndTime(e.target.value)}
+                                                />
+                                            </FormControl>
+                                        </HStack>
 
                                         <FormControl>
-                                            <FormLabel fontSize="xs">
-                                                Cause / diagnostic
-                                            </FormLabel>
-
+                                            <FormLabel fontSize="xs">Cause / diagnostic final</FormLabel>
                                             <Input
                                                 bg="white"
                                                 placeholder="Ex: moteur remplacé, réarmement thermique..."
-                                                value={reason}
-                                                onChange={(e) =>
-                                                    setReason(
-                                                        e.target
-                                                            .value
-                                                    )
-                                                }
+                                                value={closeReason}
+                                                onChange={(e) => setCloseReason(e.target.value)}
                                             />
                                         </FormControl>
 
@@ -630,22 +473,15 @@ export default function TicketDowntimeTab({
                                             <Button
                                                 size="sm"
                                                 variant="ghost"
-                                                onClick={() =>
-                                                    setShowResolveForm(
-                                                        false
-                                                    )
-                                                }
+                                                onClick={() => setShowResolveForm(false)}
                                             >
                                                 Retour
                                             </Button>
-
                                             <Button
                                                 size="sm"
                                                 colorScheme="green"
                                                 isLoading={loading}
-                                                onClick={
-                                                    handleCloseDowntime
-                                                }
+                                                onClick={handleCloseDowntime}
                                             >
                                                 Clôturer
                                             </Button>
@@ -657,19 +493,9 @@ export default function TicketDowntimeTab({
                     </VStack>
                 </Box>
 
-                {/* ===================================================== */}
                 {/* HISTORY */}
-                {/* ===================================================== */}
-
-                <Box
-                    bg="white"
-                    borderWidth="1px"
-                    borderRadius="xl"
-                    overflow="hidden"
-                    shadow="sm"
-                >
+                <Box bg="white" borderWidth="1px" borderRadius="xl" overflow="hidden" shadow="sm">
                     <Table size="md">
-
                         <Thead bg="gray.50">
                             <Tr>
                                 <Th>Début</Th>
@@ -679,72 +505,37 @@ export default function TicketDowntimeTab({
                                 <Th>Cause</Th>
                             </Tr>
                         </Thead>
-
                         <Tbody>
                             {logs.length > 0 ? (
                                 logs.map((log) => (
-                                    <Tr
-                                        key={log.id}
-                                        _hover={{
-                                            bg: 'gray.50',
-                                        }}
-                                    >
-                                        <Td fontSize="sm">
-                                            {formatDateTime(
-                                                log.start_time
-                                            )}
+                                    <Tr key={log.id} _hover={{ bg: 'gray.50' }}>
+                                        <Td fontSize="sm">{formatDateTime(log.start_time)}</Td>
+                                        <Td fontSize="sm">{formatDateTime(log.end_time)}</Td>
+                                        <Td fontWeight="semibold" color="gray.700">
+                                            {formatDuration(log.duration_seconds)}
                                         </Td>
-
-                                        <Td fontSize="sm">
-                                            {formatDateTime(
-                                                log.end_time
-                                            )}
-                                        </Td>
-
-                                        <Td
-                                            fontWeight="semibold"
-                                            color="gray.700"
-                                        >
-                                            {formatDuration(
-                                                log.duration_seconds
-                                            )}
-                                        </Td>
-
                                         <Td>
                                             <Badge
                                                 borderRadius="md"
                                                 variant="subtle"
                                                 colorScheme={
-                                                    log.status ===
-                                                        'CLOSED'
+                                                    log.status === 'CLOSED'
                                                         ? 'green'
-                                                        : log.status ===
-                                                            'ONGOING'
+                                                        : log.status === 'ONGOING'
                                                             ? 'orange'
                                                             : 'gray'
                                                 }
                                             >
-                                                {log.status ===
-                                                    'ONGOING'
+                                                {log.status === 'ONGOING'
                                                     ? 'En cours'
-                                                    : log.status ===
-                                                        'CLOSED'
+                                                    : log.status === 'CLOSED'
                                                         ? 'Clôturé'
                                                         : 'Annulé'}
                                             </Badge>
                                         </Td>
-
-                                        <Td
-                                            maxW="250px"
-                                            fontSize="sm"
-                                            color="gray.600"
-                                        >
+                                        <Td maxW="250px" fontSize="sm" color="gray.600">
                                             {log.reason || (
-                                                <Text
-                                                    as="span"
-                                                    color="gray.400"
-                                                    fontStyle="italic"
-                                                >
+                                                <Text as="span" color="gray.400" fontStyle="italic">
                                                     Aucune raison
                                                 </Text>
                                             )}
@@ -753,15 +544,8 @@ export default function TicketDowntimeTab({
                                 ))
                             ) : (
                                 <Tr>
-                                    <Td
-                                        colSpan={5}
-                                        textAlign="center"
-                                        py={8}
-                                    >
-                                        <Text
-                                            fontSize="sm"
-                                            color="gray.400"
-                                        >
+                                    <Td colSpan={5} textAlign="center" py={8}>
+                                        <Text fontSize="sm" color="gray.400">
                                             Aucun downtime enregistré.
                                         </Text>
                                     </Td>

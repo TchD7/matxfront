@@ -1,322 +1,245 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { memo } from 'react';
 import {
     Box,
-    Flex,
     VStack,
     HStack,
-    Button,
     Text,
-    Heading,
-    SimpleGrid,
-    useToast,
     Badge,
-    Divider,
-    useDisclosure,
+    Switch,
+    IconButton,
+    Flex,
+    Divider
 } from '@chakra-ui/react';
-import { FiPlus, FiCloudLightning } from 'react-icons/fi';
 
-import api from '../../api/apiClient';
-import FieldDefinitionModal from './FieldDefinitionModal';
-import { FieldRow } from './fieldDefinition/FieldRow';
-import type { InterventionType, Section, FieldDefinition } from './fieldDefinition/types';
-import { wouldCreateCycle } from './fieldDefinition/helpers';
+import {
+    FiArrowUp,
+    FiArrowDown,
+    FiTrash2,
+    FiEdit2,
+    FiLock,
+    FiUnlock
+} from 'react-icons/fi';
 
-export default function FieldDefinitionTable() {
-    const toast = useToast();
-    const { isOpen, onOpen, onClose } = useDisclosure();
+import type { FieldDefinition } from './fieldDefinition/types';
 
-    const [interventionTypes, setInterventionTypes] = useState<InterventionType[]>([]);
-    const [selectedTypeId, setSelectedTypeId] = useState<string | number>('');
-    const [sections, setSections] = useState<Section[]>([]);
-    const [isDeploying, setIsDeploying] = useState<Record<string | number, boolean>>({});
+interface Props {
+    fields: FieldDefinition[];
+    sectionId: string | number;
+    isSectionDeployed?: boolean; // Reçu du parent (vrai si lié à une version publiée)
 
-    const fieldCounterRef = useRef(0);
-
-    /* FETCH TYPES */
-    useEffect(() => {
-        api.get('/api/v1/intervention-types/')
-            .then((res) => {
-                const data = res.data.results || res.data;
-                setInterventionTypes(data);
-                if (data.length > 0) {
-                    setSelectedTypeId(data[0].id);
-                }
-            })
-            .catch((err) => console.error(err));
-    }, []);
-
-    /* FETCH STRUCTURE */
-    useEffect(() => {
-        const controller = new AbortController();
-        setSections([]);
-
-        if (!selectedTypeId) return;
-
-        const fetchStructure = async () => {
-            try {
-                const sectionRes = await api.get(
-                    `/api/v1/sections/?intervention_type=${selectedTypeId}`,
-                    { signal: controller.signal }
-                );
-
-                const sectionData = sectionRes.data.results || sectionRes.data;
-
-                const completeSections = await Promise.all(
-                    sectionData.map(async (section: any) => {
-                        const fieldRes = await api.get(
-                            `/api/v1/field-definitions/?section_id=${section.id}`,
-                            { signal: controller.signal }
-                        );
-
-                        const fields = fieldRes.data.results || fieldRes.data;
-
-                        return {
-                            id: section.id,
-                            title: section.title,
-                            fields: fields.sort(
-                                (a: any, b: any) => (a.order || 0) - (b.order || 0)
-                            ),
-                        };
-                    })
-                );
-
-                setSections(completeSections);
-            } catch (err: any) {
-                if (err.name !== 'CanceledError') console.error(err);
-            }
-        };
-
-        fetchStructure();
-        return () => controller.abort();
-    }, [selectedTypeId]);
-
-    /* CALLBACKS LOGIQUE DE SECTIONS / CHAMPS */
-    const addFieldToSectionLocal = useCallback((sectionId: string | number) => {
-        fieldCounterRef.current += 1;
-        const tempId = `temp-fld-${crypto.randomUUID()}`;
-
-        setSections((prev) =>
-            prev.map((section) => {
-                if (section.id !== sectionId) return section;
-
-                return {
-                    ...section,
-                    fields: [
-                        ...section.fields,
-                        {
-                            id: tempId,
-                            label: '',
-                            field_type: 'text',
-                            required: false,
-                            code: `param_${fieldCounterRef.current}`,
-                            options: [],
-                            depends_on_field_id: null,
-                            depends_on_value: null,
-                        },
-                    ],
-                };
-            })
-        );
-    }, []);
-
-    const removeFieldFromSectionLocal = useCallback((sectionId: string | number, fieldId: string | number) => {
-        setSections((prev) =>
-            prev.map((section) => {
-                if (section.id !== sectionId) return section;
-                return {
-                    ...section,
-                    fields: section.fields.filter((field) => field.id !== fieldId),
-                };
-            })
-        );
-    }, []);
-
-    const updateFieldLocal = useCallback((
-        sectionId: string | number,
+    onUpdateField: (
         fieldId: string | number,
         key: keyof FieldDefinition,
         value: any
-    ) => {
-        setSections((prev) =>
-            prev.map((section) => {
-                if (section.id !== sectionId) return section;
+    ) => void;
 
-                const currentField = section.fields.find((f) => f.id === fieldId);
-                if (!currentField) return section;
+    onDeleteField: (fieldId: string | number) => void;
 
-                if (
-                    key === 'depends_on_field_id' &&
-                    wouldCreateCycle(section.fields, fieldId, value)
-                ) {
-                    return section;
-                }
+    onMoveField: (
+        index: number,
+        direction: 'up' | 'down'
+    ) => void;
 
-                return {
-                    ...section,
-                    fields: section.fields.map((field) =>
-                        field.id === fieldId
-                            ? {
-                                ...field,
-                                [key]: value,
-                                ...(key === 'depends_on_field_id' ? { depends_on_value: null } : {}),
-                            }
-                            : field
-                    ),
-                };
-            })
-        );
-    }, []);
-
-    const moveFieldLocal = useCallback((sectionId: string | number, index: number, direction: 'up' | 'down') => {
-        setSections((prev) =>
-            prev.map((section) => {
-                if (section.id !== sectionId) return section;
-
-                const targetIndex = direction === 'up' ? index - 1 : index + 1;
-                if (targetIndex < 0 || targetIndex >= section.fields.length) return section;
-
-                const updated = [...section.fields];
-                [updated[index], updated[targetIndex]] = [updated[targetIndex], updated[index]];
-
-                return { ...section, fields: updated };
-            })
-        );
-    }, []);
-
-    const handleDeploySection = async (section: Section) => {
-        try {
-            setIsDeploying((prev) => ({ ...prev, [section.id]: true }));
-
-            const payload = section.fields.map((field, index) => ({
-                ...(String(field.id).startsWith('temp') ? {} : { id: field.id }),
-                label: field.label,
-                field_type: field.field_type,
-                required: field.required,
-                code: field.code,
-                order: index,
-                depends_on_field_id: field.depends_on_field_id || null,
-                depends_on_value: field.depends_on_value || null,
-                options: ['select', 'multi_select', 'radio'].includes(field.field_type)
-                    ? field.options || []
-                    : [],
-            }));
-
-            await api.post('/api/v1/field-definitions/deploy/', {
-                section_id: section.id,
-                fields: payload,
-            });
-
-            toast({ title: 'Déploiement réussi', status: 'success', duration: 3000 });
-        } catch (err: any) {
-            toast({
-                title: 'Erreur déploiement',
-                description: err.response?.data?.detail || 'Erreur inconnue',
-                status: 'error',
-            });
-        } finally {
-            setIsDeploying((prev) => ({ ...prev, [section.id]: false }));
-        }
-    };
-
-    return (
-        <SimpleGrid columns={{ base: 1, lg: 4 }} gap={6} p={5}>
-            {/* PANEL GAUCHE */}
-            <Box bg="white" p={4} borderRadius="xl" border="1px solid #eee">
-                <Heading size="xs" textTransform="uppercase" mb={4} color="gray.500">
-                    Types d'intervention
-                </Heading>
-                <VStack align="stretch">
-                    {interventionTypes.map((type) => {
-                        const active = selectedTypeId === type.id;
-                        return (
-                            <Box
-                                key={type.id}
-                                p={3}
-                                borderRadius="lg"
-                                cursor="pointer"
-                                bg={active ? 'purple.50' : 'transparent'}
-                                color={active ? 'purple.700' : 'gray.700'}
-                                fontWeight={active ? 'bold' : 'normal'}
-                                onClick={() => setSelectedTypeId(type.id)}
-                            >
-                                {type.name}
-                            </Box>
-                        );
-                    })}
-                </VStack>
-            </Box>
-
-            {/* PANEL DROITE */}
-            <Box gridColumn={{ base: 'span 1', lg: 'span 3' }} bg="white" p={5} borderRadius="xl" border="1px solid #eee">
-                <Flex justify="space-between" align="center" mb={6}>
-                    <Box>
-                        <Heading size="md">Builder intelligent</Heading>
-                        <Text fontSize="sm" color="gray.500">Champs dynamiques conditionnels</Text>
-                    </Box>
-                    <Button leftIcon={<FiPlus />} colorScheme="purple" variant="outline" size="sm" onClick={onOpen}>
-                        Nouvelle section
-                    </Button>
-                </Flex>
-
-                <Divider mb={6} />
-
-                <VStack spacing={6} align="stretch">
-                    {sections.map((section) => (
-                        <Box key={section.id} p={4} borderRadius="xl" border="1px solid" borderColor="purple.100">
-                            <Flex justify="space-between" align="center" mb={4}>
-                                <HStack>
-                                    <Text fontWeight="bold" color="purple.700">{section.title}</Text>
-                                    <Badge colorScheme="purple">{section.fields.length} champs</Badge>
-                                </HStack>
-                                <Button
-                                    size="xs"
-                                    colorScheme="purple"
-                                    leftIcon={<FiCloudLightning />}
-                                    isLoading={isDeploying[section.id]}
-                                    onClick={() => handleDeploySection(section)}
-                                >
-                                    Déployer
-                                </Button>
-                            </Flex>
-
-                            <VStack spacing={3} align="stretch">
-                                {section.fields.map((field, index) => (
-                                    <FieldRow
-                                        key={field.id}
-                                        field={field}
-                                        index={index}
-                                        totalFields={section.fields.length}
-                                        siblingFields={section.fields}
-                                        onUpdate={(key, value) => updateFieldLocal(section.id, field.id, key, value)}
-                                        onDelete={() => removeFieldFromSectionLocal(section.id, field.id)}
-                                        onMove={(direction) => moveFieldLocal(section.id, index, direction)}
-                                    />
-                                ))}
-                            </VStack>
-
-                            <Button
-                                mt={4}
-                                size="xs"
-                                leftIcon={<FiPlus />}
-                                variant="ghost"
-                                colorScheme="purple"
-                                onClick={() => addFieldToSectionLocal(section.id)}
-                            >
-                                Ajouter un champ
-                            </Button>
-                        </Box>
-                    ))}
-                </VStack>
-            </Box>
-
-            <FieldDefinitionModal
-                isOpen={isOpen}
-                onClose={onClose}
-                mode="section"
-                interventionTypeId={selectedTypeId}
-                currentSectionsCount={sections.length}
-                onSuccess={() => setSelectedTypeId(selectedTypeId)}
-            />
-        </SimpleGrid>
-    );
+    onEditField: (field: FieldDefinition) => void;
 }
+
+const FieldDefinitionListComponent = ({
+    fields = [],
+    isSectionDeployed = false,
+    onUpdateField,
+    onDeleteField,
+    onMoveField,
+    onEditField
+}: Props) => {
+
+    // ============================================================
+    // EMPTY STATE
+    // ============================================================
+    if (!fields.length) {
+        return (
+            <Text
+                fontSize="sm"
+                color="gray.400"
+                textAlign="center"
+                py={6}
+            >
+
+                Aucun champ dans cette section
+            </Text>
+        );
+    }
+
+    // ============================================================
+    // RENDER
+    // ============================================================
+    return (
+        <VStack spacing={3} align="stretch">
+            {fields.map((field, index) => {
+                const isDependency = Boolean(field.depends_on_field_id);
+
+                return (
+                    <Box
+                        key={field.id}
+                        bg={isSectionDeployed ? "gray.50" : "white"}
+                        border="1px solid"
+                        borderColor={isSectionDeployed ? "green.100" : "gray.200"}
+                        borderRadius="lg"
+                        p={4}
+                        position="relative"
+                        _hover={{
+                            borderColor: isSectionDeployed ? 'green.300' : 'purple.200',
+                            shadow: 'sm'
+                        }}
+                    >
+                        {/* HEADER */}
+                        <Flex justify="space-between" align="start">
+                            <Box>
+                                <HStack spacing={2} wrap="wrap">
+                                    <Badge colorScheme={isSectionDeployed ? "green" : "purple"}>
+                                        #{index + 1}
+                                    </Badge>
+                                    <Text fontWeight="bold" color={isSectionDeployed ? "gray.700" : "gray.900"}>
+                                        {field.label || 'Champ sans titre'}
+                                    </Text>
+
+                                    {/* Statut dynamique basé sur le backend */}
+                                    {isSectionDeployed ? (
+                                        <Badge variant="outline" colorScheme="green" fontSize="10px">
+                                            <HStack spacing={1}>
+                                                <FiLock size={10} />
+                                                <Text>Synchronisé (Prod)</Text>
+                                            </HStack>
+                                        </Badge>
+                                    ) : (
+                                        <Badge variant="outline" colorScheme="orange" fontSize="10px">
+                                            <HStack spacing={1}>
+                                                <FiUnlock size={10} />
+                                                <Text>Brouillon / Éditable</Text>
+                                            </HStack>
+                                        </Badge>
+                                    )}
+                                </HStack>
+
+                                <Text
+                                    fontSize="xs"
+                                    color="gray.500"
+                                    fontFamily="mono"
+                                    mt={1}
+                                >
+                                    {field.code}
+                                </Text>
+                            </Box>
+
+                            {/* ACTIONS BUTTONS */}
+                            <HStack spacing={1}>
+                                <IconButton
+                                    aria-label="Déplacer vers le haut"
+                                    size="xs"
+                                    icon={<FiArrowUp />}
+                                    isDisabled={index === 0}
+                                    onClick={() => onMoveField(index, 'up')}
+                                />
+
+                                <IconButton
+                                    aria-label="Déplacer vers le bas"
+                                    size="xs"
+                                    icon={<FiArrowDown />}
+                                    isDisabled={index === fields.length - 1}
+                                    onClick={() => onMoveField(index, 'down')}
+                                />
+
+                                <IconButton
+                                    aria-label="Modifier le champ"
+                                    size="xs"
+                                    colorScheme="blue"
+                                    variant="ghost"
+                                    icon={<FiEdit2 />}
+                                    onClick={() => onEditField(field)}
+                                />
+
+                                <IconButton
+                                    aria-label="Supprimer le champ"
+                                    size="xs"
+                                    colorScheme="red"
+                                    variant="ghost"
+                                    icon={<FiTrash2 />}
+                                    onClick={() => {
+                                        if (confirm(`Supprimer le champ "${field.label || field.code}" ?`)) {
+                                            onDeleteField(field.id);
+                                        }
+                                    }}
+                                />
+                            </HStack>
+                        </Flex>
+
+                        <Divider my={3} borderColor={isSectionDeployed ? "green.100" : "gray.200"} />
+
+                        {/* BODY */}
+                        <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
+                            <HStack spacing={2} wrap="wrap">
+                                <Badge variant="subtle" colorScheme="gray">
+                                    {field.field_type}
+                                </Badge>
+
+                                {field.required && (
+                                    <Badge colorScheme="red">
+                                        requis
+                                    </Badge>
+                                )}
+
+                                {field.unit && (
+                                    <Badge colorScheme="green">
+                                        {field.unit}
+                                    </Badge>
+                                )}
+
+                                {Array.isArray(field.options) && field.options.length > 0 && (
+                                    <Badge colorScheme="blue">
+                                        {field.options.length} options
+                                    </Badge>
+                                )}
+                            </HStack>
+
+                            {/* REQUIRED TOGGLE */}
+                            <HStack spacing={2}>
+                                <Text fontSize="xs" color="gray.500">Requis</Text>
+                                <Switch
+                                    aria-label="Marquer comme requis"
+                                    size="sm"
+                                    colorScheme={isSectionDeployed ? "green" : "purple"}
+                                    isChecked={field.required}
+                                    onChange={(e) =>
+                                        onUpdateField(field.id, 'required', e.target.checked)
+                                    }
+                                />
+                            </HStack>
+                        </Flex>
+
+                        {/* DEPENDENCY CONDITIONS */}
+                        {isDependency && (
+                            <Box
+                                mt={3}
+                                p={2}
+                                borderRadius="md"
+                                bg={isSectionDeployed ? "green.50" : "purple.50"}
+                                border="1px solid"
+                                borderColor={isSectionDeployed ? "green.100" : "purple.100"}
+                            >
+                                <Text fontSize="xs" color={isSectionDeployed ? "green.700" : "purple.700"} fontWeight="bold">
+                                    👁 Visible si :
+                                </Text>
+                                <Text fontSize="sm" fontWeight="medium" mt={0.5} color="gray.700">
+                                    {field.depends_on_field_id} = {field.depends_on_value}
+                                </Text>
+                            </Box>
+                        )}
+                    </Box>
+                );
+            })}
+        </VStack>
+    );
+};
+
+const FieldDefinitionList = memo(FieldDefinitionListComponent);
+
+export default FieldDefinitionList;

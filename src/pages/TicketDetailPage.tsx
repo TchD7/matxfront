@@ -378,12 +378,12 @@ export default function TicketDetailPage({
             {/* CONTENT */}
             <Box p={6}>
                 <VStack align="stretch" spacing={6}>
-                    {/* AUTO REFRESH INDICATOR */}
+                    {/* AUTO REFRESH INDICATOR 
                     if (isFetching) {
                         <Text fontSize="sm" color="gray.500">
                             Synchronisation...
                         </Text>
-                    }
+                    }*/}
 
                     {/* STATUS */}
                     <TicketStatusDetail ticket={ticket} />

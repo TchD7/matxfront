@@ -1,174 +1,94 @@
 import {
-    Box,
-    VStack,
-    HStack,
-    Text,
-    Badge,
-    Progress,
-    Icon,
-    SimpleGrid,
-    Stat,
-    StatLabel,
-    StatNumber,
-    StatHelpText,
-    Divider,
     Alert,
     AlertIcon,
-    AlertTitle,
-    AlertDescription,
+    Badge,
+    Box,
+    Center,
+    Divider,
+    HStack,
+    Icon,
+    Progress,
+    SimpleGrid,
+    Spinner,
+    Stat,
+    StatHelpText,
+    StatLabel,
+    StatNumber,
+    Text,
+    VStack,
 } from '@chakra-ui/react';
-
-import { ComponentType } from 'react';
-
+import { useMemo, type ComponentType } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
 import {
-    FiClock,
-    FiCheckCircle,
-    FiAlertTriangle,
-    FiPlay,
-    FiPause,
-    FiXCircle,
-    FiUser,
+    FiAlertCircle,
     FiCalendar,
-    FiTool,
+    FiCheckCircle,
+    FiClock,
+    FiPlay,
 } from 'react-icons/fi';
+import { formatDateTime } from '../../utils/userUtils';
+import type { User } from '../types/user.types';
 
-// ================= TYPES =================
-interface Ticket {
-    id: string;
-    number?: string;
-    status: string;
-
-    equipment?: {
-        id?: string;
-        name?: string;
-        emplacement?: string;
-        series?: string;
-        marque?: string;
-        code?: string;
-        criticality?: string;
-        nominal_cycle_time?: number;
+interface TicketStatusDetailProps {
+    ticket: {
+        id: string | number;
+        status: string;
+        created_at: string;
+        actual_duration?: number | null;
+        estimated_duration?: number | null;
+        is_late?: boolean | null;
+        started_at?: string | null;
+        is_breakdown?: boolean;
+        late_duration_minutes?: number | null;
+        priority?: string | null;
+        equipment?: {
+            name?: string;
+            code?: string;
+            criticality?: string;
+            emplacement?: string;
+            series?: string;
+            marque?: string;
+        } | null;
+        technician_name?: string | null;
+        intervention_type?: {
+            name?: string;
+        } | null;
+        planned_at?: string | null;
+        ended_at?: string | null;
     };
-
-    intervention_type?: {
-        name?: string;
-    };
-
-    technician_name?: string | null;
-
-    planned_at?: string;
-    started_at?: string;
-    ended_at?: string;
-
-    is_breakdown?: boolean;
-    is_late?: boolean;
-    late_duration_minutes?: number | null;
-
-    priority?: string;
-
-    estimated_duration?: number;
-    actual_duration?: number | null;
 }
 
-// ================= STATUS CONFIG =================
-const getStatusConfig = (status: string) => {
-    switch (status?.toLowerCase()) {
-        case 'draft':
-        case 'open':
-            return {
-                label: 'Brouillon',
-                color: 'gray',
-                progress: 10,
-                description: 'Ticket créé et en attente de traitement',
-                icon: FiPause,
-                actions: ['Assigner', 'Planifier'],
-            };
-
-        case 'planned':
-            return {
-                label: 'Planifié',
-                color: 'purple',
-                progress: 25,
-                description: 'Intervention planifiée',
-                icon: FiCalendar,
-                actions: ['Démarrer', 'Modifier'],
-            };
-
-        case 'in_progress':
-            return {
-                label: 'En cours',
-                color: 'blue',
-                progress: 60,
-                description: 'Intervention en cours',
-                icon: FiPlay,
-                actions: ['Suspendre', 'Terminer'],
-            };
-
-        case 'paused':
-            return {
-                label: 'En pause',
-                color: 'orange',
-                progress: 50,
-                description: 'Intervention temporairement suspendue',
-                icon: FiPause,
-                actions: ['Reprendre', 'Annuler'],
-            };
-
-        case 'completed':
-            return {
-                label: 'Terminé',
-                color: 'green',
-                progress: 100,
-                description: 'Intervention terminée',
-                icon: FiCheckCircle,
-                actions: [],
-            };
-
-        case 'closed':
-            return {
-                label: 'Clôturé',
-                color: 'teal',
-                progress: 100,
-                description: 'Ticket archivé et clôturé',
-                icon: FiCheckCircle,
-                actions: [],
-            };
-
-        case 'cancelled':
-            return {
-                label: 'Annulé',
-                color: 'red',
-                progress: 0,
-                description: 'Ticket annulé',
-                icon: FiXCircle,
-                actions: [],
-            };
-
-        default:
-            return {
-                label: status || 'Inconnu',
-                color: 'gray',
-                progress: 0,
-                description: 'Statut inconnu',
-                icon: FiAlertTriangle,
-                actions: [],
-            };
+const formatDuration = (minutes?: number | null) => {
+    if (minutes === undefined || minutes === null || minutes === 0) {
+        return "Non spécifiée";
     }
+
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+
+    if (hours > 0) {
+        return `${hours}h ${mins > 0 ? mins + 'min' : ''}`;
+    }
+    return `${mins}min`;
 };
 
-// ================= HELPERS FORMATAGE HORS COMPOSANT =================
-const formatDelay = (minutes: number | null | undefined) => {
-    if (minutes === null || minutes === undefined) return null;
+const formatDelay = (minutes?: number | null) => {
+    if (minutes == null || minutes <= 0) {
+        return '0 min';
+    }
 
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
 
-    if (h > 0) return `${h}h ${m}min`;
-    return `${m}min`;
+    return [hours > 0 ? `${hours} h` : null, `${remainingMinutes} min`]
+        .filter(Boolean)
+        .join(' ');
 };
 
-const getCriticalityColor = (criticality?: string) => {
-    switch (criticality?.toLowerCase()) {
-        case 'critical':
+const getPriorityColor = (priority?: string | null) => {
+    switch (priority?.toLowerCase()) {
+        case 'urgent':
         case 'high':
             return 'red';
         case 'medium':
@@ -176,354 +96,643 @@ const getCriticalityColor = (criticality?: string) => {
         case 'low':
             return 'green';
         default:
+            return 'blue';
+    }
+};
+
+const getProgressColor = (progress: number) => {
+    if (progress <= 33) return 'red';
+    if (progress <= 66) return 'orange';
+    return 'green';
+};
+
+const getCriticalityColor = (criticality?: string | null) => {
+    switch (criticality?.toLowerCase()) {
+        case 'critical':
+            return 'red';
+        case 'high':
+            return 'orange';
+        case 'medium':
+            return 'yellow';
+        default:
             return 'gray';
     }
 };
 
-const getCriticalityLabel = (criticality?: string) => {
+const getCriticalityLabel = (criticality?: string | null) => {
     switch (criticality?.toLowerCase()) {
-        case 'critical': return 'Critique';
-        case 'high': return 'Haute';
-        case 'medium': return 'Moyenne';
-        case 'low': return 'Faible';
-        default: return 'Non définie';
+        case 'critical':
+            return 'Critique';
+        case 'high':
+            return 'Élevée';
+        case 'medium':
+            return 'Moyenne';
+        default:
+            return 'Normale';
     }
 };
 
-// ================= COMPONENT =================
-interface TicketStatusDetailProps {
-    ticket: Ticket;
+const getStatusConfig = (status?: string) => {
+    const normalized = status?.toLowerCase();
+
+    switch (normalized) {
+        case 'draft':
+            return {
+                icon: FiClock,
+                label: 'Brouillon',
+                color: 'gray',
+                progress: 0,
+                description: 'Le ticket est en brouillon et n’est pas encore planifié.',
+            };
+        case 'planned':
+            return {
+                icon: FiCalendar,
+                label: 'Planifié',
+                color: 'purple',
+                progress: 20,
+                description: 'Le ticket est planifié et attend le démarrage.',
+            };
+        case 'in_progress':
+        case 'in progress':
+            return {
+                icon: FiPlay,
+                label: 'En cours',
+                color: 'blue',
+                progress: 60,
+                description: 'Le ticket est en cours de traitement.',
+            };
+        case 'completed':
+            return {
+                icon: FiCheckCircle,
+                label: 'Terminé',
+                color: 'green',
+                progress: 100,
+                description: 'Le ticket est terminé.',
+            };
+        case 'closed':
+            return {
+                icon: FiAlertCircle,
+                label: 'Clôturé',
+                color: 'orange',
+                progress: 100,
+                description: 'Le ticket est fermé.',
+            };
+        default:
+            return {
+                icon: FiAlertCircle,
+                label: 'Inconnu',
+                color: 'gray',
+                progress: 0,
+                description: 'Statut inconnu.',
+            };
+    }
+};
+
+interface FieldRendererProps {
+    ticketId: string | number;
+    field: any;
 }
 
-export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) {
-    const statusConfig = getStatusConfig(ticket.status);
+function FieldRenderer({ field }: FieldRendererProps) {
+    const value = field.value ?? field.placeholder ?? 'N/A';
+    return (
+        <Text fontSize="sm" color="gray.700">
+            {value}
+        </Text>
+    );
+}
+
+export default function TicketStatusDetail({
+    ticket,
+}: TicketStatusDetailProps) {
+
+    // =========================================================
+    // STATUS CONFIG
+    // =========================================================
+
+    const statusConfig = useMemo(
+        () => getStatusConfig(ticket.status),
+        [ticket.status]
+    );
+
     const StatusIcon = statusConfig.icon as ComponentType;
 
-    const hasActualDuration = ticket.actual_duration !== undefined && ticket.actual_duration !== null;
-    const durationToDisplay = hasActualDuration ? ticket.actual_duration : ticket.estimated_duration;
+    // =========================================================
+    // DURATION
+    // =========================================================
 
-    // 🟢 DÉPLACEMENT ET CORRECTION DES CALCULS DE RETARD À L'INTÉRIEUR DU COMPOSANT
+    const hasActualDuration =
+        ticket.actual_duration !== null &&
+        ticket.actual_duration !== undefined;
+
+    const durationToDisplay = hasActualDuration
+        ? ticket.actual_duration
+        : ticket.estimated_duration;
+
+    // =========================================================
+    // LATE CALCULATIONS
+    // =========================================================
+
     const normalizedStatus = ticket.status?.toLowerCase();
+
     const isLate =
         ticket.is_late === true &&
-        normalizedStatus !== 'completed' &&
-        normalizedStatus !== 'closed' &&
-        normalizedStatus !== 'draft';
+        !['completed', 'closed', 'draft'].includes(
+            normalizedStatus
+        );
 
-    const showLateDuration = isLate && !!ticket.started_at;
+    const showLateDuration =
+        isLate &&
+        Boolean(ticket.started_at);
 
-    // ================= HELPERS INTERNES =================
-    const getProgressColor = () => {
-        if (statusConfig.progress >= 100) return 'green';
-        if (statusConfig.progress >= 70) return 'blue';
-        if (statusConfig.progress >= 30) return 'purple';
-        return 'gray';
-    };
+    // =========================================================
+    // DYNAMIC FORM
+    // =========================================================
 
-    const getPriorityColor = (priority?: string) => {
-        switch (priority?.toLowerCase()) {
-            case 'high':
-            case 'urgent':
-                return 'red';
-            case 'medium':
-            case 'normal':
-                return 'orange';
-            case 'low':
-                return 'green';
-            default:
-                return 'gray';
-        }
-    };
+    const {
+        data: dynamicForm = [],
+        isLoading,
+        error,
+    } = useQuery({
+        queryKey: ['ticket-form', ticket.id],
 
-    const formatDate = (date?: string) => {
-        if (!date) return 'N/A';
-        return new Date(date).toLocaleString('fr-FR', {
-            dateStyle: 'medium',
-            timeStyle: 'short',
-        });
-    };
+        queryFn: async () => {
+            const response = await axios.get(
+                `/api/v1/tickets/${ticket.id}/render/`
+            );
 
-    const formatDuration = (minutes?: number | null) => {
-        if (minutes === undefined || minutes === null || minutes === 0) {
-            return "Non spécifiée";
-        }
+            return response.data;
+        },
 
-        const hours = Math.floor(minutes / 60);
-        const mins = minutes % 60;
+        enabled: Boolean(ticket.id),
+        staleTime: 1000 * 60 * 5,
+    });
 
-        if (hours > 0) {
-            return `${hours}h ${mins > 0 ? mins + 'min' : ''}`;
-        }
-        return `${mins}min`;
-    };
+    // =========================================================
+    // UI
+    // =========================================================
 
     return (
-        <Box
-            bg="white"
-            borderRadius="xl"
-            p={6}
-            shadow="sm"
-            border="1px solid"
-            borderColor="gray.100"
+        <VStack
+            spacing={6}
+            align="stretch"
+            width="100%"
         >
-            <VStack align="stretch" spacing={6}>
-                {/* HEADER */}
-                <HStack justify="space-between" align="flex-start">
-                    <HStack spacing={4} align="flex-start">
-                        <Box
-                            p={3}
-                            borderRadius="full"
-                            bg={`${statusConfig.color}.50`}
-                            color={`${statusConfig.color}.600`}
+
+            {/* ================================================= */}
+            {/* STATUS DETAIL */}
+            {/* ================================================= */}
+
+            <Box
+                bg="white"
+                borderRadius="xl"
+                p={6}
+                shadow="sm"
+                border="1px solid"
+                borderColor="gray.100"
+            >
+                <VStack
+                    align="stretch"
+                    spacing={6}
+                >
+
+                    {/* HEADER */}
+
+                    <HStack
+                        justify="space-between"
+                        align="flex-start"
+                    >
+                        <HStack
+                            spacing={4}
+                            align="flex-start"
                         >
-                            <Icon as={StatusIcon} fontSize="xl" />
-                        </Box>
+                            <Box
+                                p={3}
+                                borderRadius="full"
+                                bg={`${statusConfig.color}.50`}
+                                color={`${statusConfig.color}.600`}
+                            >
+                                <Icon
+                                    as={StatusIcon}
+                                    fontSize="xl"
+                                />
+                            </Box>
 
-                        <VStack align="flex-start" spacing={1}>
-                            <HStack spacing={2} flexWrap="wrap">
-                                <Text fontSize="lg" fontWeight="bold">
-                                    Statut : {statusConfig.label}
-                                </Text>
-
-                                {ticket.is_breakdown && (
-                                    <Badge colorScheme="red" variant="solid">
-                                        <HStack spacing={1}>
-                                            <Icon as={FiAlertTriangle} boxSize={3} />
-                                            <Text fontSize="xs">Panne</Text>
-                                        </HStack>
-                                    </Badge>
-                                )}
-
-                                {isLate && (
-                                    <Badge colorScheme="orange" variant="outline">
-                                        En retard
-                                    </Badge>
-                                )}
-
-                                {showLateDuration && typeof ticket.late_duration_minutes === 'number' && (
-                                    <Badge colorScheme="red" variant="subtle">
-                                        Retard : {formatDelay(ticket.late_duration_minutes)}
-                                    </Badge>
-                                )}
-                            </HStack>
-
-                            <Text color="gray.600" fontSize="sm">
-                                {statusConfig.description}
-                            </Text>
-                        </VStack>
-                    </HStack>
-
-                    {ticket.priority && (
-                        <Badge
-                            colorScheme={getPriorityColor(ticket.priority)}
-                            variant="solid"
-                            fontSize="xs"
-                            px={3}
-                            py={1}
-                        >
-                            Priorité : {ticket.priority}
-                        </Badge>
-                    )}
-                </HStack>
-
-                {/* PROGRESS */}
-                <Box>
-                    <HStack justify="space-between" mb={2}>
-                        <Text fontSize="sm" fontWeight="medium">
-                            Progression
-                        </Text>
-                        <Text fontSize="sm" color="gray.600">
-                            {statusConfig.progress}%
-                        </Text>
-                    </HStack>
-
-                    <Progress
-                        value={statusConfig.progress}
-                        colorScheme={getProgressColor()}
-                        borderRadius="full"
-                        size="lg"
-                    />
-                </Box>
-
-                {/* METRICS */}
-                <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
-                    <Stat>
-                        <StatLabel fontSize="sm" color="gray.600">
-                            <HStack spacing={1}>
-                                <Icon as={FiTool} />
-                                <Text>Équipement</Text>
-                            </HStack>
-                        </StatLabel>
-                        <StatNumber fontSize="md" noOfLines={1}>
-                            {ticket.equipment?.name || 'N/A'}
-                        </StatNumber>
-                        <StatHelpText fontSize="xs">
-                            {ticket.equipment?.code || 'Aucun code'}
-                        </StatHelpText>
-                    </Stat>
-
-                    <Stat>
-                        <StatLabel fontSize="sm" color="gray.600">
-                            <HStack spacing={1}>
-                                <Icon as={FiUser} />
-                                <Text>Technicien</Text>
-                            </HStack>
-                        </StatLabel>
-                        <StatNumber
-                            fontSize="md"
-                            color={ticket.technician_name ? 'black' : 'gray.400'}
-                        >
-                            {ticket.technician_name || 'Non assigné'}
-                        </StatNumber>
-                        <StatHelpText fontSize="xs">
-                            {ticket.intervention_type?.name || 'Type non défini'}
-                        </StatHelpText>
-                    </Stat>
-
-                    <Stat>
-                        <StatLabel fontSize="sm" color="gray.600">
-                            <HStack spacing={1}>
-                                <Icon as={FiClock} />
-                                <Text>Durée</Text>
-                            </HStack>
-                        </StatLabel>
-                        <StatNumber fontSize="md">
-                            {formatDuration(durationToDisplay)}
-                        </StatNumber>
-                        <StatHelpText fontSize="xs">
-                            {hasActualDuration ? 'Réelle' : 'Estimée'}
-                        </StatHelpText>
-                    </Stat>
-                </SimpleGrid>
-
-                <Divider />
-
-                {/* EQUIPMENT DETAILS */}
-                {ticket.equipment && (
-                    <Box>
-                        <Text fontSize="sm" fontWeight="bold" mb={3}>
-                            Détails de l'équipement
-                        </Text>
-
-                        <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
-                            <Stat>
-                                <StatLabel>Nom</StatLabel>
-                                <StatNumber fontSize="md">
-                                    {ticket.equipment.name || 'N/A'}
-                                </StatNumber>
-                            </Stat>
-
-                            <Stat>
-                                <StatLabel>Code</StatLabel>
-                                <StatNumber fontSize="md">
-                                    {ticket.equipment.code || 'N/A'}
-                                </StatNumber>
-                            </Stat>
-
-                            <Stat>
-                                <StatLabel>Criticité</StatLabel>
-                                <Box mt={2}>
-                                    <Badge
-                                        colorScheme={getCriticalityColor(
-                                            ticket.equipment.criticality
-                                        )}
+                            <VStack
+                                align="flex-start"
+                                spacing={1}
+                            >
+                                <HStack
+                                    spacing={2}
+                                    flexWrap="wrap"
+                                >
+                                    <Text
+                                        fontSize="lg"
+                                        fontWeight="bold"
                                     >
-                                        {getCriticalityLabel(ticket.equipment.criticality)}
-                                    </Badge>
-                                </Box>
-                            </Stat>
+                                        Statut :
+                                        {' '}
+                                        {statusConfig.label}
+                                    </Text>
 
-                            <Stat>
-                                <StatLabel>Emplacement</StatLabel>
-                                <StatNumber fontSize="md">
-                                    {ticket.equipment.emplacement || 'N/A'}
-                                </StatNumber>
-                            </Stat>
+                                    {ticket.is_breakdown && (
+                                        <Badge
+                                            colorScheme="red"
+                                        >
+                                            Panne
+                                        </Badge>
+                                    )}
 
-                            <Stat>
-                                <StatLabel>Série</StatLabel>
-                                <StatNumber fontSize="md">
-                                    {ticket.equipment.series || 'N/A'}
-                                </StatNumber>
-                            </Stat>
+                                    {isLate && (
+                                        <Badge
+                                            colorScheme="orange"
+                                        >
+                                            En retard
+                                        </Badge>
+                                    )}
 
-                            <Stat>
-                                <StatLabel>Marque</StatLabel>
-                                <StatNumber fontSize="md">
-                                    {ticket.equipment.marque || 'N/A'}
-                                </StatNumber>
-                            </Stat>
+                                    {showLateDuration &&
+                                        typeof ticket.late_duration_minutes ===
+                                        'number' && (
+                                            <Badge
+                                                colorScheme="red"
+                                            >
+                                                Retard :
+                                                {' '}
+                                                {formatDelay(
+                                                    ticket.late_duration_minutes
+                                                )}
+                                            </Badge>
+                                        )}
+                                </HStack>
 
-                            {ticket.equipment.nominal_cycle_time !== undefined && (
+                                <Text
+                                    fontSize="sm"
+                                    color="gray.600"
+                                >
+                                    {
+                                        statusConfig.description
+                                    }
+                                </Text>
+                            </VStack>
+                        </HStack>
+
+                        {ticket.priority && (
+                            <Badge
+                                colorScheme={getPriorityColor(
+                                    ticket.priority
+                                )}
+                                px={3}
+                                py={1}
+                            >
+                                Priorité :
+                                {' '}
+                                {ticket.priority}
+                            </Badge>
+                        )}
+                    </HStack>
+
+                    {/* PROGRESS */}
+
+                    <Box>
+                        <HStack
+                            justify="space-between"
+                            mb={2}
+                        >
+                            <Text
+                                fontSize="sm"
+                                fontWeight="medium"
+                            >
+                                Progression
+                            </Text>
+
+                            <Text
+                                fontSize="sm"
+                                color="gray.600"
+                            >
+                                {statusConfig.progress}%
+                            </Text>
+                        </HStack>
+
+                        <Progress
+                            value={statusConfig.progress}
+                            colorScheme={getProgressColor(
+                                statusConfig.progress
+                            )}
+                            size="lg"
+                            borderRadius="full"
+                        />
+                    </Box>
+
+                    {/* METRICS */}
+
+                    <SimpleGrid
+                        columns={{
+                            base: 1,
+                            md: 3,
+                        }}
+                        spacing={4}
+                    >
+                        <Stat>
+                            <StatLabel>
+                                Équipement
+                            </StatLabel>
+
+                            <StatNumber
+                                fontSize="md"
+                            >
+                                {ticket.equipment?.name ??
+                                    'N/A'}
+                            </StatNumber>
+
+                            <StatHelpText>
+                                {ticket.equipment?.code ??
+                                    'Aucun code'}
+                            </StatHelpText>
+                        </Stat>
+
+                        <Stat>
+                            <StatLabel>
+                                Technicien
+                            </StatLabel>
+
+                            <StatNumber
+                                fontSize="md"
+                            >
+                                {ticket.technician_name ??
+                                    'Non assigné'}
+                            </StatNumber>
+
+                            <StatHelpText>
+                                {ticket.intervention_type
+                                    ?.name ??
+                                    'Non défini'}
+                            </StatHelpText>
+                        </Stat>
+
+                        <Stat>
+                            <StatLabel>
+                                Durée
+                            </StatLabel>
+
+                            <StatNumber
+                                fontSize="md"
+                            >
+                                {formatDuration(
+                                    durationToDisplay
+                                )}
+                            </StatNumber>
+
+                            <StatHelpText>
+                                {hasActualDuration
+                                    ? 'Réelle'
+                                    : 'Estimée'}
+                            </StatHelpText>
+                        </Stat>
+                    </SimpleGrid>
+
+                    {/* EQUIPMENT */}
+
+                    {ticket.equipment && (
+                        <>
+                            <Divider />
+
+                            <SimpleGrid
+                                columns={{
+                                    base: 1,
+                                    md: 2,
+                                    lg: 3,
+                                }}
+                                spacing={4}
+                            >
                                 <Stat>
-                                    <StatLabel>Temps cycle nominal</StatLabel>
-                                    <StatNumber fontSize="md">
-                                        {ticket.equipment.nominal_cycle_time}s
+                                    <StatLabel>
+                                        Nom
+                                    </StatLabel>
+
+                                    <StatNumber
+                                        fontSize="md"
+                                    >
+                                        {
+                                            ticket
+                                                .equipment
+                                                .name
+                                        }
                                     </StatNumber>
-                                    <StatHelpText fontSize="xs">par pièce</StatHelpText>
                                 </Stat>
+
+                                <Stat>
+                                    <StatLabel>
+                                        Code
+                                    </StatLabel>
+
+                                    <StatNumber
+                                        fontSize="md"
+                                    >
+                                        {
+                                            ticket
+                                                .equipment
+                                                .code
+                                        }
+                                    </StatNumber>
+                                </Stat>
+
+                                <Stat>
+                                    <StatLabel>
+                                        Criticité
+                                    </StatLabel>
+
+                                    <Box mt={2}>
+                                        <Badge
+                                            colorScheme={getCriticalityColor(
+                                                ticket
+                                                    .equipment
+                                                    .criticality
+                                            )}
+                                        >
+                                            {getCriticalityLabel(
+                                                ticket
+                                                    .equipment
+                                                    .criticality
+                                            )}
+                                        </Badge>
+                                    </Box>
+                                </Stat>
+
+                                <Stat>
+                                    <StatLabel>
+                                        Emplacement
+                                    </StatLabel>
+
+                                    <StatNumber
+                                        fontSize="md"
+                                    >
+                                        {
+                                            ticket
+                                                .equipment
+                                                .emplacement
+                                        }
+                                    </StatNumber>
+                                </Stat>
+
+                                <Stat>
+                                    <StatLabel>
+                                        Série
+                                    </StatLabel>
+
+                                    <StatNumber
+                                        fontSize="md"
+                                    >
+                                        {
+                                            ticket
+                                                .equipment
+                                                .series
+                                        }
+                                    </StatNumber>
+                                </Stat>
+
+                                <Stat>
+                                    <StatLabel>
+                                        Marque
+                                    </StatLabel>
+
+                                    <StatNumber
+                                        fontSize="md"
+                                    >
+                                        {
+                                            ticket
+                                                .equipment
+                                                .marque
+                                        }
+                                    </StatNumber>
+                                </Stat>
+                            </SimpleGrid>
+                        </>
+                    )}
+
+                    {/* TIMELINE */}
+
+                    {(ticket.planned_at ||
+                        ticket.started_at ||
+                        ticket.ended_at) && (
+                            <>
+                                <Divider />
+
+                                <VStack
+                                    align="stretch"
+                                    spacing={3}
+                                >
+                                    {ticket.created_at && (
+                                        <Text>
+                                            Créé :
+                                            {' '}
+                                            {formatDateTime(
+                                                ticket.created_at
+                                            )}
+                                        </Text>
+                                    )}
+                                    {ticket.planned_at && (
+                                        <Text>
+                                            Planifié :
+                                            {' '}
+                                            {formatDateTime(
+                                                ticket.planned_at
+                                            )}
+                                        </Text>
+                                    )}
+
+                                    {ticket.started_at && (
+                                        <Text>
+                                            Démarré :
+                                            {' '}
+                                            {formatDateTime(
+                                                ticket.started_at
+                                            )}
+                                        </Text>
+                                    )}
+
+                                    {ticket.ended_at && (
+                                        <Text>
+                                            Terminé :
+                                            {' '}
+                                            {formatDateTime(
+                                                ticket.ended_at
+                                            )}
+                                        </Text>
+                                    )}
+                                </VStack>
+                            </>
+                        )}
+                </VStack>
+            </Box>
+
+            {/* ================================================= */}
+            {/* FORMULAIRE DYNAMIQUE */}
+            {/* ================================================= */}
+
+            {isLoading ? (
+                <Center py={10}>
+                    <Spinner />
+                </Center>
+            ) : error ? (
+                <Alert status="error">
+                    <AlertIcon />
+                    Impossible de charger le formulaire.
+                </Alert>
+            ) : (
+                Array.isArray(dynamicForm) &&
+                dynamicForm.map((section: any) => (
+                    <Box
+                        key={section.section_id}
+                        bg="white"
+                        p={6}
+                        borderRadius="xl"
+                        shadow="sm"
+                    >
+                        <Text
+                            fontWeight="bold"
+                            mb={4}
+                        >
+                            {section.section_title}
+                        </Text>
+
+                        <SimpleGrid
+                            columns={{
+                                base: 1,
+                                md: 2,
+                            }}
+                            spacing={4}
+                        >
+                            {section.fields?.map(
+                                (field: any) => (
+                                    <Box
+                                        key={field.id}
+                                    >
+                                        <Text
+                                            fontSize="xs"
+                                            fontWeight="bold"
+                                            mb={1}
+                                        >
+                                            {
+                                                field.label
+                                            }
+                                        </Text>
+
+                                        <FieldRenderer
+                                            ticketId={
+                                                ticket.id
+                                            }
+                                            field={
+                                                field
+                                            }
+                                        />
+                                    </Box>
+                                )
                             )}
                         </SimpleGrid>
                     </Box>
-                )}
-
-                {/* TIMELINE */}
-                {(ticket.planned_at || ticket.started_at || ticket.ended_at) && (
-                    <>
-                        <Divider />
-                        <Box>
-                            <Text fontSize="sm" fontWeight="bold" mb={3}>
-                                Chronologie
-                            </Text>
-
-                            <VStack align="stretch" spacing={3}>
-                                {ticket.planned_at && (
-                                    <HStack>
-                                        <Icon as={FiCalendar} color="purple.500" />
-                                        <Text fontSize="sm">
-                                            Planifié : {formatDate(ticket.planned_at)}
-                                        </Text>
-                                    </HStack>
-                                )}
-
-                                {ticket.started_at && (
-                                    <HStack>
-                                        <Icon as={FiPlay} color="blue.500" />
-                                        <Text fontSize="sm">
-                                            Démarré : {formatDate(ticket.started_at)}
-                                        </Text>
-                                    </HStack>
-                                )}
-
-                                {ticket.ended_at && (
-                                    <HStack>
-                                        <Icon as={FiCheckCircle} color="green.500" />
-                                        <Text fontSize="sm">
-                                            Terminé : {formatDate(ticket.ended_at)}
-                                        </Text>
-                                    </HStack>
-                                )}
-                            </VStack>
-                        </Box>
-                    </>
-                )}
-
-                {/* ACTIONS */}
-                {statusConfig.actions.length > 0 && (
-                    <>
-                        <Divider />
-                        <Alert status="info" borderRadius="lg">
-                            <AlertIcon />
-                            <Box>
-                                <AlertTitle fontSize="sm">Actions disponibles</AlertTitle>
-                                <AlertDescription fontSize="sm">
-                                    {statusConfig.actions.join(' • ')}
-                                </AlertDescription>
-                            </Box>
-                        </Alert>
-                    </>
-                )}
-            </VStack>
-        </Box>
+                ))
+            )}
+        </VStack>
     );
 }

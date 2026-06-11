@@ -12,7 +12,7 @@ import {
 } from '@chakra-ui/react';
 
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import api, { logout as apiLogout } from '../api/apiClient';
 import { useAuth } from '../hooks/useAuth';
@@ -26,16 +26,19 @@ import TicketDetailPage from './TicketDetailPage';
 import TicketModal from '../components/dashboard/TicketModal';
 import DashboardHome from '../components/dashboard/DashboardHome';
 import CockpitManager from '../components/cockpit/CockpitManager';
+import Logs from './Logs';
+import GlobalSearchPage from '../components/layout/GlobalSearchPage';
 
 
 // ================= TYPES =================
-type DashboardView = 'home' | 'profile' | 'users' | 'user-detail' | 'tickets' | 'ticket-detail' | 'cockpit';
+type DashboardView = 'home' | 'profile' | 'users' | 'user-detail' | 'tickets' | 'ticket-detail' | 'cockpit' | 'logs' | 'search';
 
 // ================= COMPONENT =================
 export default function Dashboard() {
   // ✅ HOOKS
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isOpen, onOpen, onClose } = useDisclosure();
 
   const [user, setUser] = useState<any>(null);
@@ -55,6 +58,15 @@ export default function Dashboard() {
   );
   const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
   const [ticketRefreshTrigger, setTicketRefreshTrigger] = useState(0);
+  const q = searchParams.get('q') || '';
+
+  useEffect(() => {
+    if (q && view !== 'search') {
+      setView('search');
+    } else if (!q && view === 'search') {
+      setView('home');
+    }
+  }, [q, view]);
 
   // ================= LOGOUT CLEAN =================
   const handleLogout = async () => {
@@ -102,6 +114,17 @@ export default function Dashboard() {
     setView('tickets');
   };
 
+  const goToLogsView = () => {
+    setView('logs');
+  };
+
+  const goToSearchView = (search: string) => {
+    if (search.trim()) {
+      setSearchParams({ q: search.trim() });
+      setView('search');
+    }
+  };
+
   const handleTicketSuccess = () => {
     setIsTicketModalOpen(false);
     setTicketRefreshTrigger((prev) => prev + 1);
@@ -144,10 +167,13 @@ export default function Dashboard() {
         onProfileClick={() => setView('profile')}
         onOpenSidebar={onOpen}
         onLogout={handleLogout}
+        onSearch={goToSearchView}
         onCreateTicket={openCreateTicketModal}
         onViewTickets={goToTicketsView}
+        onViewLogs={goToLogsView}
         showCreateTicketButton={true}
         showViewTicketsButton={true}
+        showLogsButton={true}
       />
 
       <Flex flex="1" overflow="hidden">
@@ -227,6 +253,16 @@ export default function Dashboard() {
           {/* VUE : COCKPIT (Équipements & Interventions) */}
           {view === 'cockpit' && (
             <CockpitManager />
+          )}
+
+          {/* VUE : SEARCH GLOBALE */}
+          {view === 'search' && (
+            <GlobalSearchPage query={q} />
+          )}
+
+          {/* VUE : LOGS (tickets draft) */}
+          {view === 'logs' && (
+            <Logs onBack={() => setView('home')} />
           )}
 
         </Box>

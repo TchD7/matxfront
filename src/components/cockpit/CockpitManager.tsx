@@ -8,7 +8,7 @@ import { FiTool, FiSettings, FiList, FiPackage, FiAlertTriangle } from 'react-ic
 
 import EquipmentTable from './EquipmentTable';
 import InterventionTypeTable from './InterventionTypeTable';
-import FieldDefinitionTable from './FieldDefinitionTable';
+import FieldBuilderSection from './FieldBuilderSection';
 import ConsumablesTable from './ConsumablesTable';
 
 // 👉 NOUVEAU
@@ -105,14 +105,14 @@ export default function CockpitManager() {
                     </TabPanel>
 
                     <TabPanel p={0}>
-                        <FieldDefinitionTable />
+                        <FieldBuilderSection />
                     </TabPanel>
 
                     <TabPanel p={0}>
                         <ConsumablesTable />
                     </TabPanel>
 
-                    {/* 👉 NOUVEAU PANEL */}
+                    {/*  NOUVEAU TAB FAILURE REASONS */}
                     <TabPanel p={0}>
                         <FailureReasonTable />
                     </TabPanel>

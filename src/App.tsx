@@ -16,10 +16,10 @@ function App() {
     const tenant = localStorage.getItem('tenant_api_url');
 
     if (tenant) {
-      console.log('🏢 Restoration tenant App boot:', tenant);
+      //console.log('🏢 Restoration tenant App boot:', tenant);
       updateApiBaseURL(tenant);
     } else {
-      console.log('📍 Aucun tenant → backend central');
+      //console.log('📍 Aucun tenant → backend central');
     }
   }, []);
 
@@ -54,6 +54,7 @@ function App() {
             </AuthGuard>
           }
         />
+
       </Routes>
     </Router>
   );

@@ -264,12 +264,11 @@ export default function TicketHeader({
                     </HStack>
 
                     <Text fontSize="sm" color="gray.500">
-                        {ticket.equipment?.name || 'Équipement'} ({ticket.equipment?.code || 'N/A'})
+                        {ticket.equipment?.name || 'Équipement'}
                     </Text>
+                    
 
-                    <Text fontSize="sm">
-                        {ticket.intervention_type?.name || 'Type non défini'}
-                    </Text>
+                    
 
                 </VStack>
 

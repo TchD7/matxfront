@@ -18,8 +18,8 @@ import {
     Divider,
 } from '@chakra-ui/react';
 
-import { useEffect, useState } from 'react';
-import { FiEdit2 } from 'react-icons/fi'; // Importation de l'icône Crayon
+import { useEffect, useState, useRef } from 'react';
+import { FiEdit2 } from 'react-icons/fi';
 import api from '../../api/apiClient';
 
 // ================= TYPES =================
@@ -39,7 +39,7 @@ interface TicketResult {
 interface Ticket {
     id: string;
     status: string;
-    result?: TicketResult | null; // Intégration du résultat existant
+    result?: TicketResult | null;
 }
 
 interface FormState {
@@ -48,7 +48,6 @@ interface FormState {
     comment: string;
     auto_followup: boolean;
 }
-
 
 // ================= COMPONENT =================
 
@@ -59,13 +58,17 @@ export default function TicketResultTab({
     ticket: Ticket;
     onRefresh: () => void;
 }) {
+
     const toast = useToast();
 
     const [loading, setLoading] = useState(false);
     const [reasons, setReasons] = useState<FailureReason[]>([]);
 
-    // Mode édition : faux par défaut si un résultat existe déjà sur le ticket
+    // Mode édition
     const [isEditing, setIsEditing] = useState(!ticket?.result);
+
+    // Verrou pour empêcher le useEffect de tout écraser pendant le rafraîchissement
+    const isRefreshingRef = useRef(false);
 
     const [form, setForm] = useState<FormState>({
         result: 'ok',
@@ -76,6 +79,12 @@ export default function TicketResultTab({
 
     // ================= SYNC FORM WITH TICKET DATA =================
     useEffect(() => {
+        // CORRECTION : Si on est en train de rafraîchir et que le ticket reçu n'a pas encore de résultat,
+        // on bloque l'exécution pour éviter que l'affichage ne disparaisse.
+        if (isRefreshingRef.current && !ticket?.result) {
+            return;
+        }
+
         if (ticket?.result) {
             setForm({
                 result: (ticket.result.result?.toLowerCase() === 'nok' ? 'nok' : 'ok'),
@@ -83,9 +92,10 @@ export default function TicketResultTab({
                 comment: ticket.result.comment ?? '',
                 auto_followup: ticket.result.auto_followup ?? true,
             });
-            setIsEditing(false); // Masque les champs si un résultat existe déjà
+            setIsEditing(false);
+            isRefreshingRef.current = false; // Fin du rafraîchissement, les données réelles sont là
         } else {
-            setIsEditing(true);  // Mode édition actif si aucun résultat
+            setIsEditing(true);
         }
     }, [ticket]);
 
@@ -125,7 +135,10 @@ export default function TicketResultTab({
                 status: 'success',
             });
 
-            setIsEditing(false); // Repasse en mode affichage masqué
+            // On active le verrou AVANT de lancer onRefresh()
+            isRefreshingRef.current = true;
+            setIsEditing(false); // On masque directement les champs de saisie
+
             onRefresh();
         } catch (err: any) {
             toast({
@@ -149,7 +162,9 @@ export default function TicketResultTab({
 
     const isNok = form.result === 'nok';
 
-    // Retrouver le label de la panne sélectionnée pour l'affichage en mode lecture seule
+    // On affiche la vue lecture seule si on n'est pas en train d'éditer ET (soit le ticket a un résultat, soit le verrou est actif)
+    const showReadOnlyView = !isEditing && (ticket.result || isRefreshingRef.current);
+
     const selectedReasonLabel = reasons.find(r => r.id === form.reason)?.label || `ID: ${form.reason}`;
 
     return (
@@ -165,22 +180,24 @@ export default function TicketResultTab({
                         </Badge>
                     </HStack>
 
-                    {/* Bouton Crayon : Visible uniquement si on ne modifie pas déjà, et sans appel API immédiat */}
-                    {!isEditing && (
+                    {showReadOnlyView && (
                         <IconButton
                             icon={<FiEdit2 />}
                             aria-label="Modifier le résultat"
                             colorScheme="blue"
                             variant="ghost"
-                            onClick={() => setIsEditing(true)} // Changement d'état purement local
+                            onClick={() => {
+                                isRefreshingRef.current = false; // On désactive le verrou si l'utilisateur force l'édition manuel
+                                setIsEditing(true);
+                            }}
                         />
                     )}
                 </HStack>
 
                 <Divider />
 
-                {/* ================= MODE 1 : VUE RÉSULTAT MASQUÉE (LECTURE SEULE) ================= */}
-                {!isEditing && ticket.result && (
+                {/* ================= MODE 1 : VUE RÉSULTAT (LECTURE SEULE) ================= */}
+                {showReadOnlyView && (
                     <VStack align="stretch" spacing={4} bg="gray.50" p={4} borderRadius="lg" borderWidth="1px">
                         <Heading size="xs" textTransform="uppercase" color="gray.500" letterSpacing="wider">
                             Résultat Enregistré
@@ -216,11 +233,10 @@ export default function TicketResultTab({
                     </VStack>
                 )}
 
-                {/* ================= MODE 2 : FORMULAIRE D'ÉDITION ACTIF ================= */}
+                {/* ================= MODE 2 : FORMULAIRE D'ÉDITION ================= */}
                 {isEditing && (
-                    <VStack spacing={5} align="stretch" animation="fadeIn 0.2s ease-out">
+                    <VStack spacing={5} align="stretch">
 
-                        {/* FORMULAIRE : CHOIX RESULTAT */}
                         <FormControl>
                             <FormLabel fontWeight="semibold">Résultat</FormLabel>
                             <Select
@@ -237,7 +253,6 @@ export default function TicketResultTab({
                             </Select>
                         </FormControl>
 
-                        {/* FORMULAIRE : CAUSE DE PANNE (SI NOK) */}
                         {isNok && (
                             <FormControl isRequired>
                                 <FormLabel fontWeight="semibold">Cause de la panne</FormLabel>
@@ -260,7 +275,6 @@ export default function TicketResultTab({
                             </FormControl>
                         )}
 
-                        {/* FORMULAIRE : COMMENTAIRE */}
                         <FormControl>
                             <FormLabel fontWeight="semibold">Commentaire</FormLabel>
                             <Textarea
@@ -276,7 +290,6 @@ export default function TicketResultTab({
                             />
                         </FormControl>
 
-                        {/* FORMULAIRE : SWITCH SUIVI */}
                         <HStack justify="space-between" bg="gray.50" p={3} borderRadius="md">
                             <Box>
                                 <Text fontWeight="medium">Suivi automatique</Text>
@@ -294,7 +307,6 @@ export default function TicketResultTab({
                             />
                         </HStack>
 
-                        {/* BUTTONS ACTIONS */}
                         <HStack spacing={4} pt={2}>
                             <Button
                                 colorScheme="green"
@@ -305,8 +317,7 @@ export default function TicketResultTab({
                                 Enregistrer le résultat
                             </Button>
 
-                            {/* Annuler l'édition locale et revenir au visuel masqué sans recharger l'API */}
-                            {ticket.result && (
+                            {(ticket.result || isRefreshingRef.current) && (
                                 <Button
                                     variant="outline"
                                     onClick={() => setIsEditing(false)}

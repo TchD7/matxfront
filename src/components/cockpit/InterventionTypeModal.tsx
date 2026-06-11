@@ -1,117 +1,243 @@
 import {
-    Modal, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalBody, ModalCloseButton,
-    Button, FormControl, FormLabel, Input, Textarea, VStack, useToast, Switch, HStack, Text
+    Modal,
+    ModalOverlay,
+    ModalContent,
+    ModalHeader,
+    ModalBody,
+    ModalFooter,
+    ModalCloseButton,
+    FormControl,
+    FormLabel,
+    Input,
+    Textarea,
+    Switch,
+    Button,
+    VStack,
+    useToast,
 } from '@chakra-ui/react';
-import { useState, useEffect } from 'react';
+
+import { useEffect, useState } from 'react';
 import api from '../../api/apiClient';
 
-export default function InterventionTypeModal({ isOpen, onClose, typeData, onSuccess }) {
+interface InterventionType {
+    id?: number | string;
+    name: string;
+    description?: string;
+    is_active: boolean;
+}
+
+interface Props {
+    isOpen: boolean;
+    onClose: () => void;
+    interventionType?: InterventionType | null;
+    onSuccess: () => void;
+}
+
+export default function InterventionTypeModal({
+    isOpen,
+    onClose,
+    interventionType,
+    onSuccess,
+}: Props) {
+
     const toast = useToast();
+
     const [loading, setLoading] = useState(false);
 
-    const [formData, setFormData] = useState({
+    const [form, setForm] = useState<InterventionType>({
         name: '',
         description: '',
-        fields: '', // On va le gérer comme une chaîne JSON pour l'édition
-        is_active: true
+        is_active: true,
     });
 
     useEffect(() => {
-        if (typeData) {
-            setFormData({
-                name: typeData.name || '',
-                description: typeData.description || '',
-                // Si fields est un objet, on le stringify pour le textarea
-                fields: typeData.fields ? JSON.stringify(typeData.fields, null, 2) : '',
-                is_active: typeData.is_active ?? true
+
+        if (interventionType) {
+            setForm({
+                name: interventionType.name,
+                description: interventionType.description || '',
+                is_active: interventionType.is_active,
             });
         } else {
-            setFormData({ name: '', description: '', fields: '', is_active: true });
-        }
-    }, [typeData, isOpen]);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-
-        // Validation du JSON pour le champ 'fields'
-        let processedFields = null;
-        if (formData.fields.trim() !== '') {
-            try {
-                processedFields = JSON.parse(formData.fields);
-            } catch (err) {
-                toast({ title: "Format JSON invalide pour les champs", status: "error" });
-                setLoading(false);
-                return;
-            }
+            setForm({
+                name: '',
+                description: '',
+                is_active: true,
+            });
         }
 
-        const payload = { ...formData, fields: processedFields };
+    }, [interventionType, isOpen]);
+
+    const handleChange = (
+        field: keyof InterventionType,
+        value: any
+    ) => {
+        setForm(prev => ({
+            ...prev,
+            [field]: value,
+        }));
+    };
+
+    const handleSubmit = async () => {
 
         try {
-            if (typeData) {
-                await api.put(`/api/v1/intervention-types/${typeData.id}/`, payload);
-                toast({ title: "Type mis à jour", status: "success" });
-            } else {
-                await api.post('/api/v1/intervention-types/', payload);
-                toast({ title: "Type créé", status: "success" });
+
+            setLoading(true);
+
+            if (!form.name.trim()) {
+                toast({
+                    title: 'Nom obligatoire',
+                    status: 'warning',
+                });
+                return;
             }
+
+            if (interventionType?.id) {
+
+                await api.put(
+                    `/api/v1/intervention-types/${interventionType.id}/`,
+                    form
+                );
+
+                toast({
+                    title: 'Type modifié',
+                    status: 'success',
+                });
+
+            } else {
+
+                await api.post(
+                    '/api/v1/intervention-types/',
+                    form
+                );
+
+                toast({
+                    title: 'Type créé',
+                    status: 'success',
+                });
+            }
+
             onSuccess();
             onClose();
-        } catch (err) {
-            toast({ title: "Erreur lors de l'enregistrement", status: "error" });
+
+        } catch (error: any) {
+
+            toast({
+                title: 'Erreur',
+                description:
+                    error?.response?.data?.detail ||
+                    'Impossible d\'enregistrer',
+                status: 'error',
+            });
+
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} size="lg">
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            size="lg"
+        >
             <ModalOverlay />
-            <ModalContent as="form" onSubmit={handleSubmit}>
-                <ModalHeader>{typeData ? 'Modifier le type' : 'Nouveau type'}</ModalHeader>
+
+            <ModalContent>
+
+                <ModalHeader>
+                    {interventionType
+                        ? 'Modifier le type'
+                        : 'Nouveau type'}
+                </ModalHeader>
+
                 <ModalCloseButton />
 
                 <ModalBody>
-                    <VStack spacing={4} align="start">
-                        <HStack w="full" justify="space-between">
-                            <FormControl display="flex" alignItems="center">
-                                <FormLabel mb="0">Actif ?</FormLabel>
-                                <Switch
-                                    colorScheme="purple"
-                                    isChecked={formData.is_active}
-                                    onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                                />
-                            </FormControl>
-                        </HStack>
+
+                    <VStack spacing={4}>
 
                         <FormControl isRequired>
-                            <FormLabel>Nom de la catégorie</FormLabel>
+                            <FormLabel>
+                                Nom
+                            </FormLabel>
+
                             <Input
-                                value={formData.name}
-                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                placeholder="ex: Maintenance Préventive"
+                                value={form.name}
+                                onChange={(e) =>
+                                    handleChange(
+                                        'name',
+                                        e.target.value
+                                    )
+                                }
                             />
                         </FormControl>
 
                         <FormControl>
-                            <FormLabel>Description</FormLabel>
+                            <FormLabel>
+                                Description
+                            </FormLabel>
+
                             <Textarea
-                                value={formData.description}
-                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                rows={4}
+                                value={form.description}
+                                onChange={(e) =>
+                                    handleChange(
+                                        'description',
+                                        e.target.value
+                                    )
+                                }
                             />
                         </FormControl>
 
+                        <FormControl
+                            display="flex"
+                            alignItems="center"
+                        >
+                            <FormLabel
+                                mb="0"
+                                flex={1}
+                            >
+                                Actif
+                            </FormLabel>
+
+                            <Switch
+                                isChecked={form.is_active}
+                                onChange={(e) =>
+                                    handleChange(
+                                        'is_active',
+                                        e.target.checked
+                                    )
+                                }
+                            />
+                        </FormControl>
 
                     </VStack>
+
                 </ModalBody>
 
                 <ModalFooter>
-                    <Button variant="ghost" onClick={onClose}>Annuler</Button>
-                    <Button colorScheme="purple" type="submit" isLoading={loading}>
-                        Enregistrer
+
+                    <Button
+                        mr={3}
+                        variant="ghost"
+                        onClick={onClose}
+                    >
+                        Annuler
                     </Button>
+
+                    <Button
+                        colorScheme="purple"
+                        onClick={handleSubmit}
+                        isLoading={loading}
+                    >
+                        {interventionType
+                            ? 'Mettre à jour'
+                            : 'Créer'}
+                    </Button>
+
                 </ModalFooter>
+
             </ModalContent>
         </Modal>
     );

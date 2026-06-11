@@ -2,7 +2,7 @@
  * Utilitaires pour le système CRUD des utilisateurs
  */
 
-import { User } from '../types/user.types';
+import type { User } from '../types/user.types';
 import { EMAIL_REGEX, PHONE_REGEX, NAME_REGEX } from '../config/security.config';
 
 // ================= VALIDATION =================
@@ -119,6 +119,7 @@ export function formatDateTime(dateString: string): string {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      second: '2-digit',
     });
   } catch {
     return '-';
