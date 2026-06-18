@@ -5,16 +5,18 @@ import {
     TabPanels,
     Tab,
     TabPanel,
-    Spinner,
     Center,
     VStack,
     Text,
     useToast,
     Skeleton,
     SkeletonText,
+    Alert,
+    AlertIcon,
+    AlertTitle,
+    AlertDescription,
 } from '@chakra-ui/react';
-
-import { useEffect, useMemo, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -42,43 +44,14 @@ import {
 // Auth
 import { useAuth } from '../context/AuthContext';
 
-
 // ======================================================
 // TYPES
 // ======================================================
-
-interface Equipment {
-    id: number;
-    name: string;
-    code?: string;
-}
-
-interface InterventionType {
-    id: number;
-    name: string;
-    color?: string;
-}
-
-interface TicketLog {
-    id: number;
-    action: string;
-    created_at: string;
-    created_by_name?: string;
-    message?: string;
-}
-
-interface ConsumableUsage {
-    id: number;
-    quantity: number;
-    consumable_name: string;
-}
-
-interface TicketResult {
-    result?: string;
-    comment?: string;
-    completed_at?: string;
-}
-
+interface Equipment { id: number; name: string; code?: string; }
+interface InterventionType { id: number; name: string; color?: string; }
+interface TicketLog { id: number; action: string; created_at: string; created_by_name?: string; message?: string; }
+interface ConsumableUsage { id: number; quantity: number; consumable_name: string; }
+interface TicketResult { result?: string; comment?: string; completed_at?: string; }
 interface TicketPermissions {
     can_start?: boolean;
     can_assign?: boolean;
@@ -88,13 +61,8 @@ interface TicketPermissions {
     can_unassign?: boolean;
     can_duplicate?: boolean;
 }
-
-interface TicketUI {
-    show_planning?: boolean;
-    show_advanced_tabs?: boolean;
-}
-
-interface Ticket {
+interface TicketUI { show_planning?: boolean; show_advanced_tabs?: boolean; }
+export interface Ticket {
     id: string;
     number?: string;
     status: string;
@@ -113,126 +81,65 @@ interface TicketDetailPageProps {
     onBack?: () => void;
 }
 
-
 // ======================================================
-// COMPONENT
+// CUSTOM HOOKS
 // ======================================================
 
-export default function TicketDetailPage({
-    ticketId,
-    onBack,
-}: TicketDetailPageProps) {
-
-    // 🟢 1. TOUS LES HOOKS INITIALISÉS EN PREMIER SANS INTERRUPTION
-    const { id } = useParams();
-    const navigate = useNavigate();
-    const toast = useToast();
-    const queryClient = useQueryClient();
-    const { user } = useAuth();
-
-    const effectiveTicketId = ticketId ?? id;
-
-    // ======================================================
-    // FETCH (Définition stable de la fonction de requête)
-    // ======================================================
-    const fetchTicket = useCallback(async (): Promise<Ticket> => {
-        if (!effectiveTicketId) throw new Error("ID du ticket manquant");
-        const response = await api.get(
-            `/api/v1/tickets/${effectiveTicketId}/`
-        );
-        return response.data;
-    }, [effectiveTicketId]);
-
-    // UseQuery appelé de manière inconditionnelle
-    const {
-        data: ticket,
-        isLoading,
-        isFetching,
-        refetch,
-    } = useQuery<Ticket>({
-        queryKey: ['ticket', effectiveTicketId],
-        queryFn: fetchTicket,
-        enabled: !!effectiveTicketId, // Ne s'exécute que si un ID est présent
+const useTicket = (id?: string | number | null) => {
+    return useQuery<Ticket>({
+        queryKey: ['ticket', id],
+        queryFn: async () => {
+            if (!id) throw new Error("ID du ticket manquant");
+            const response = await api.get(`/api/v1/tickets/${id}/`);
+            return response.data;
+        },
+        enabled: !!id,
         staleTime: 1000 * 20,
         refetchOnWindowFocus: true,
     });
+};
 
-    // ======================================================
-    // GLOBAL ACTION MUTATION
-    // ======================================================
+const useTicketActions = (
+    ticket: Ticket | undefined,
+    user: any,
+    queryClient: any,
+    toast: ReturnType<typeof useToast>,
+    navigate: any,
+    onBack?: () => void
+) => {
     const actionMutation = useMutation({
-        mutationFn: async ({
-            action,
-            payload,
-        }: {
-            action: string;
-            payload?: any;
-        }) => {
-            if (!ticket) return;
+        mutationFn: async ({ action, payload }: { action: string; payload?: any }) => {
+            if (!ticket) throw new Error("Aucun ticket sélectionné");
 
             const actionHandlers: Record<string, () => Promise<any>> = {
-                start: async () => {
-                    return startTicket(ticket.id, {
-                        technician_id: user?.id || 1,
-                    });
-                },
-                assign: async () => {
-                    return assignTicket(ticket.id, {
-                        technician_id: payload?.technician_id || user?.id || 1,
-                        planned_at: payload?.planned_at || new Date().toISOString(),
-                    });
-                },
-                complete: async () => {
-                    return completeTicket(ticket.id, {
-                        technician_id: user?.id || 1,
-                        result: payload?.result || 'ok',
-                        comment: payload?.comment || 'Clôture intervention',
-                    });
-                },
-                close: async () => {
-                    return closeTicket(ticket.id);
-                },
-                delete: async () => {
-                    return deleteTicket(ticket.id);
-                },
-                unassign: async () => {
-                    return api.post(`/api/v1/tickets/${ticket.id}/unassign/`);
-                },
-                duplicate: async () => {
-                    return api.post(
-                        `/api/v1/tickets/${ticket.id}/duplicate/`,
-                        {
-                            mode: payload?.mode || 'linked',
-                            intervention_type_id: payload?.intervention_type_id || null,
-                        }
-                    );
-                },
+                start: () => startTicket(ticket.id, { technician_id: user?.id || 1 }),
+                assign: () => assignTicket(ticket.id, {
+                    technician_id: payload?.technician_id || user?.id || 1,
+                    planned_at: payload?.planned_at || new Date().toISOString(),
+                }),
+                complete: () => completeTicket(ticket.id, {
+                    technician_id: user?.id || 1,
+                    result: payload?.result || 'ok',
+                    comment: payload?.comment || 'Clôture intervention',
+                }),
+                close: () => closeTicket(ticket.id),
+                delete: () => deleteTicket(ticket.id),
+                unassign: () => api.post(`/api/v1/tickets/${ticket.id}/unassign/`),
+                duplicate: () => api.post(`/api/v1/tickets/${ticket.id}/duplicate/`, {
+                    mode: payload?.mode || 'linked',
+                    intervention_type_id: payload?.intervention_type_id || null,
+                }),
             };
 
-            if (!actionHandlers[action]) {
-                throw new Error(`Action inconnue : ${action}`);
-            }
-
+            if (!actionHandlers[action]) throw new Error(`Action inconnue : ${action}`);
             return actionHandlers[action]();
         },
         onSuccess: async (response, variables) => {
-            await queryClient.invalidateQueries({
-                queryKey: ['ticket', effectiveTicketId],
-            });
+            await queryClient.invalidateQueries({ queryKey: ['ticket', ticket?.id] });
 
             if (variables.action === 'delete') {
-                toast({
-                    title: 'Ticket supprimé',
-                    status: 'success',
-                    duration: 3000,
-                    isClosable: true,
-                });
-
-                if (onBack) {
-                    onBack();
-                } else {
-                    navigate(-1);
-                }
+                toast({ title: 'Ticket supprimé', status: 'success', duration: 3000, isClosable: true });
+                onBack ? onBack() : navigate(-1);
                 return;
             }
 
@@ -249,20 +156,12 @@ export default function TicketDetailPage({
                 return;
             }
 
-            toast({
-                title: 'Action exécutée',
-                status: 'success',
-                duration: 2500,
-                isClosable: true,
-            });
+            toast({ title: 'Action exécutée', status: 'success', duration: 2500, isClosable: true });
         },
         onError: (err: any) => {
             toast({
                 title: 'Erreur action',
-                description:
-                    err?.response?.data?.detail ||
-                    err?.message ||
-                    'Erreur inconnue',
+                description: err?.response?.data?.detail || err?.message || 'Erreur inconnue',
                 status: 'error',
                 duration: 4000,
                 isClosable: true,
@@ -270,150 +169,162 @@ export default function TicketDetailPage({
         },
     });
 
-    // ======================================================
-    // HANDLER
-    // ======================================================
-    const handleAction = async (action: string, payload?: any) => {
-        await actionMutation.mutateAsync({
-            action,
-            payload,
-        });
+    return {
+        handleAction: async (action: string, payload?: any) => actionMutation.mutateAsync({ action, payload }),
+        isPending: actionMutation.isPending,
+    };
+};
+
+/**
+ * Hook pour gérer la génération et le téléchargement du PDF
+ */
+const useDownloadPdf = (toast: ReturnType<typeof useToast>) => {
+    const [isDownloading, setIsDownloading] = useState(false);
+
+    const downloadPdf = async (ticketId: string | number, ticketNumber?: string) => {
+        setIsDownloading(true);
+        try {
+            const response = await api.get(`/api/v1/tickets/${ticketId}/pdf/`, {
+                responseType: 'blob',
+            });
+
+            // Création d'une URL locale pour le blob binaire
+            const blob = new Blob([response.data], { type: 'application/pdf' });
+            const url = window.URL.createObjectURL(blob);
+
+            // Création et clic sur un lien invisible
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `ticket-${ticketNumber || ticketId}.pdf`);
+            document.body.appendChild(link);
+            link.click();
+
+            // Nettoyage du DOM
+            link.parentNode?.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            toast({
+                title: "Impossible de générer le PDF du ticket.",
+                status: "error",
+                duration: 4000,
+                isClosable: true,
+            });
+        } finally {
+            setIsDownloading(false);
+        }
     };
 
-    // ======================================================
-    // UI FLAGS & TABS (Calculés via useMemo toujours actif)
-    // ======================================================
-    const showPlanningForm =
-        ticket?.ui?.show_planning ??
-        (ticket?.status === 'draft' || ticket?.status === 'pending');
+    return { downloadPdf, isDownloading };
+};
 
-    const showAdvancedTabs =
-        ticket?.ui?.show_advanced_tabs ??
-        (ticket?.status !== 'draft' && ticket?.status !== 'planned');
+// ======================================================
+// HELPERS & SOUS-COMPOSANTS
+// ======================================================
 
-    const tabs = useMemo(() => {
-        const items: {
-            key: string;
-            label: string;
-            content: React.ReactNode;
-        }[] = [];
+const buildTabs = (ticket: Ticket, refetch: () => void) => {
+    const showAdvancedTabs = ticket?.ui?.show_advanced_tabs ?? (ticket?.status !== 'draft' && ticket?.status !== 'planned');
+    const tabs = [];
 
-        if (!ticket) return items;
-
-        if (showAdvancedTabs) {
-            items.push({
-                key: 'fields',
-                label: 'Compte rendu',
-                content: <TicketFieldsTab ticket={ticket} onRefresh={refetch} />,
-            });
-
-            items.push({
-                key: 'consumables',
-                label: 'Consommables',
-                content: <TicketConsumablesTab ticket={ticket} onRefresh={refetch} />,
-            });
-
-            items.push({
-                key: 'result',
-                label: 'Résultat',
-                content: <TicketResultTab ticket={ticket} onRefresh={refetch} />,
-            });
-        }
-        items.push({
-            key: 'downtime',
-            label: 'Arrêts machine',
-            content: <TicketDowntimeTab ticket={ticket} onRefresh={refetch} />,
-        });
-
-        items.push({
-            key: 'logs',
-            label: 'Logs & Historique',
-            content: <TicketLogsTab ticket={ticket} />,
-        });
-
-        return items;
-    }, [showAdvancedTabs, ticket, refetch]);
-
-
-    // ======================================================
-    // 🛑 2. GESTION DES CLAUTES DE RENDU (EARLY RETURNS)
-    // ======================================================
-
-    // Vérification de sécurité sur la présence de l'ID globale
-    if (!effectiveTicketId) {
-        return (
-            <Center h="80vh">
-                <Text>Aucun ticket sélectionné.</Text>
-            </Center>
+    if (showAdvancedTabs) {
+        tabs.push(
+            { key: 'fields', label: 'Compte rendu', content: <TicketFieldsTab ticket={ticket} onRefresh={refetch} /> },
+            { key: 'consumables', label: 'Consommables', content: <TicketConsumablesTab ticket={ticket} onRefresh={refetch} /> },
+            { key: 'result', label: 'Résultat', content: <TicketResultTab ticket={ticket} onRefresh={refetch} /> }
         );
     }
 
-    // Affichage des Skeletons de chargement
-    if (isLoading || !ticket) {
-        return (
-            <Box p={6}>
-                <VStack spacing={6} align="stretch">
-                    <Skeleton h="100px" borderRadius="lg" />
-                    <Box bg="white" p={6} borderRadius="lg">
-                        <SkeletonText noOfLines={5} spacing={4} />
-                    </Box>
-                </VStack>
+    tabs.push(
+        { key: 'downtime', label: 'Arrêts machine', content: <TicketDowntimeTab ticket={ticket} onRefresh={refetch} /> },
+        { key: 'logs', label: 'Logs & Historique', content: <TicketLogsTab ticket={ticket} /> }
+    );
+
+    return tabs;
+};
+
+const TicketSkeleton = () => (
+    <Box p={6}>
+        <VStack spacing={6} align="stretch">
+            <Skeleton h="100px" borderRadius="lg" />
+            <Box bg="white" p={6} borderRadius="lg">
+                <SkeletonText noOfLines={5} spacing={4} />
             </Box>
-        );
+        </VStack>
+    </Box>
+);
+
+const TicketError = ({ error }: { error: any }) => (
+    <Box p={6}>
+        <Alert status="error" borderRadius="md">
+            <AlertIcon />
+            <Box>
+                <AlertTitle>Impossible de charger le ticket</AlertTitle>
+                <AlertDescription>{error?.message || 'Une erreur est survenue lors de la récupération des données.'}</AlertDescription>
+            </Box>
+        </Alert>
+    </Box>
+);
+
+// ======================================================
+// COMPOSANT PRINCIPAL
+// ======================================================
+
+export default function TicketDetailPage({ ticketId, onBack }: TicketDetailPageProps) {
+    const { id } = useParams();
+    const navigate = useNavigate();
+    const toast = useToast();
+    const queryClient = useQueryClient();
+    const { user } = useAuth();
+
+    const effectiveTicketId = ticketId ?? id;
+
+    const { data: ticket, isLoading, isError, error, refetch } = useTicket(effectiveTicketId);
+    const { handleAction, isPending } = useTicketActions(ticket, user, queryClient, toast, navigate, onBack);
+
+    // Initialisation du hook PDF
+    const { downloadPdf, isDownloading } = useDownloadPdf(toast);
+
+    const tabs = useMemo(() => ticket ? buildTabs(ticket, refetch) : [], [ticket, refetch]);
+
+    if (!effectiveTicketId) {
+        return <Center h="80vh"><Text>Aucun ticket sélectionné.</Text></Center>;
     }
 
-    // ======================================================
-    // RENDER DE L'INTERFACE PRINCIPALE
-    // ======================================================
+    if (isLoading) return <TicketSkeleton />;
+    if (isError) return <TicketError error={error} />;
+    if (!ticket) return null;
+
+    // Modification ici : Le formulaire ne s'affiche que s'il peut être assigné ET qu'aucun technicien n'est encore assigné
+    const showPlanningForm = ticket.permissions?.can_assign && !ticket.technician_name;
+
     return (
         <Box bg="gray.50" minH="100vh">
-            {/* HEADER */}
             <TicketHeader
                 ticket={ticket}
-                loading={actionMutation.isPending}
+                loading={isPending}
                 onBack={() => (onBack ? onBack() : navigate(-1))}
                 onAction={handleAction}
+                // Nouveaux props passés au header
+                onDownloadPdf={() => downloadPdf(ticket.id, ticket.number)}
+                isDownloadingPdf={isDownloading}
             />
 
-            {/* CONTENT */}
             <Box p={6}>
                 <VStack align="stretch" spacing={6}>
-                    {/* AUTO REFRESH INDICATOR 
-                    if (isFetching) {
-                        <Text fontSize="sm" color="gray.500">
-                            Synchronisation...
-                        </Text>
-                    }*/}
 
-                    {/* STATUS */}
                     <TicketStatusDetail ticket={ticket} />
 
-                    {/* PLANNING */}
                     {showPlanningForm && (
                         <TicketPlanningForm
                             ticketId={ticket.id}
                             currentStatus={ticket.status}
-                            onPlanningComplete={() => {
-                                refetch();
-                            }}
+                            onPlanningComplete={() => refetch()}
                         />
                     )}
 
-                    {/* TABS CENTRALISÉS */}
-                    <Tabs
-                        variant="enclosed"
-                        colorScheme="purple"
-                        bg="white"
-                        p={4}
-                        borderRadius="lg"
-                        shadow="sm"
-                        isLazy
-                    >
+                    <Tabs variant="enclosed" colorScheme="purple" bg="white" p={4} borderRadius="lg" shadow="sm" isLazy>
                         <TabList>
                             {tabs.map((tab) => (
-                                <Tab key={tab.key} fontWeight="semibold">
-                                    {tab.label}
-                                </Tab>
+                                <Tab key={tab.key} fontWeight="semibold">{tab.label}</Tab>
                             ))}
                         </TabList>
 
@@ -425,6 +336,7 @@ export default function TicketDetailPage({
                             ))}
                         </TabPanels>
                     </Tabs>
+
                 </VStack>
             </Box>
         </Box>

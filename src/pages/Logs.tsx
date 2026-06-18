@@ -7,37 +7,40 @@ import {
     Text,
     Button,
     Container,
+    Flex,
+    useToast,
 } from '@chakra-ui/react';
-import api from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
+import { RiDownload2Line, RiArrowLeftLine } from 'react-icons/ri';
+
+import api from '../api/apiClient';
 import TicketTable from '../components/dashboard/TicketTable';
+import { handleExportTickets } from '../components/common/ExportButton';
 
 interface LogsProps {
     onBack?: () => void;
 }
 
 export default function Logs({ onBack }: LogsProps) {
+    const navigate = useNavigate();
+    const toast = useToast();
+
     const [tickets, setTickets] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [exporting, setExporting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchDrafts = async () => {
+            setLoading(true);
             try {
-                const res = await api.get('/api/v1/ticket-analytics/?page_size=50&status=draft');
-                const payload = res.data?.data ?? res.data?.results ?? res.data;
+                const res = await api.get('/api/v1/ticket-analytics/', {
+                    params: { page_size: 50, status: 'draft' }
+                });
 
-                // Normaliser la liste des tickets
-                let items: any[] = [];
-                if (Array.isArray(payload)) {
-                    items = payload;
-                } else if (Array.isArray(payload?.results)) {
-                    items = payload.results;
-                } else if (Array.isArray(payload?.data)) {
-                    items = payload.data;
-                }
-
-                setTickets(items);
+                const data = res.data;
+                const results = data.results || data.data?.results || (Array.isArray(data) ? data : []);
+                setTickets(results);
             } catch (err: any) {
                 console.error('Erreur fetching logs:', err);
                 setError(err?.message || 'Erreur lors du chargement des logs');
@@ -49,13 +52,11 @@ export default function Logs({ onBack }: LogsProps) {
         fetchDrafts();
     }, []);
 
-    const navigate = useNavigate();
-
-    const handleOpenTicket = (id: number) => {
-        navigate(`/tickets/${id}`);
+    const handleOpenTicket = (id: string | number) => {
+        navigate(`/dashboard/tickets/${id}`);
     };
 
-    if (loading) {
+    if (loading && tickets.length === 0) {
         return (
             <Center py={10}>
                 <Spinner size="lg" color="purple.500" />
@@ -65,17 +66,30 @@ export default function Logs({ onBack }: LogsProps) {
 
     return (
         <Container maxW="full" p={0}>
-            <Box mb={6}>
-                <Heading size="md" mb={4}>Logs  {tickets.length} tickets</Heading>
+            <Flex justify="space-between" align="center" mb={6} wrap="wrap" gap={4}>
+                <Box>
+                    <Button size="sm" variant="ghost" leftIcon={<RiArrowLeftLine />} mb={2} onClick={onBack}>
+                        Retour
+                    </Button>
+                    <Heading size="md">Logs (Qualifiés) - {tickets.length} tickets</Heading>
+                </Box>
 
-                <Button size="sm" variant="ghost" mb={4} onClick={onBack}>
-                    Retour
+                <Button
+                    leftIcon={<RiDownload2Line />}
+                    colorScheme="purple"
+                    variant="outline"
+                    isLoading={exporting}
+                    onClick={() => handleExportTickets({ status: 'draft' }, setExporting, toast)}
+                >
+                    Exporter
                 </Button>
+            </Flex>
 
-                {error && (
-                    <Text color="red.500" mb={4}>{error}</Text>
-                )}
-            </Box>
+            {error && (
+                <Text color="red.500" mb={4} p={4} borderWidth="1px" borderColor="red.200" borderRadius="md">
+                    {error}
+                </Text>
+            )}
 
             <TicketTable
                 tickets={tickets}

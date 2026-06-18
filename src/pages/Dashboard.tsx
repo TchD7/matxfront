@@ -13,6 +13,7 @@ import {
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 
 import api, { logout as apiLogout } from '../api/apiClient';
 import { useAuth } from '../hooks/useAuth';
@@ -67,7 +68,11 @@ export default function Dashboard() {
       setView('home');
     }
   }, [q, view]);
-
+  const handleDuplicateSuccess = (
+    duplicatedTicketId: string | number
+) => {
+    setView('ticket-detail', duplicatedTicketId);
+};
   // ================= LOGOUT CLEAN =================
   const handleLogout = async () => {
     try {
@@ -125,9 +130,14 @@ export default function Dashboard() {
     }
   };
 
-  const handleTicketSuccess = () => {
+  const handleTicketSuccess = (createdId?: string | number) => {
     setIsTicketModalOpen(false);
     setTicketRefreshTrigger((prev) => prev + 1);
+
+    // Si l'API a renvoyé l'ID du ticket créé, naviguer vers la vue détail
+    if (createdId) {
+      setView('ticket-detail', createdId);
+    }
   };
 
   // ================= FETCH AUTHENTICATED USER =================
@@ -208,6 +218,9 @@ export default function Dashboard() {
 
         {/* MAIN CONTENT AREA */}
         <Box flex="1" overflowY="auto" p={{ base: 4, md: 8 }}>
+          {/* Remplacez toute votre logique de rendu conditionnel (if view === ...) par ceci : */}
+
+
 
           {/* HOME */}
           {view === 'home' && (
@@ -231,6 +244,8 @@ export default function Dashboard() {
             <TicketDetailPage
               ticketId={selectedTicketId}
               onBack={() => setView('tickets')}
+              onDuplicateSuccess={handleDuplicateSuccess}
+
             />
           )}
 
@@ -264,6 +279,7 @@ export default function Dashboard() {
           {view === 'logs' && (
             <Logs onBack={() => setView('home')} />
           )}
+
 
         </Box>
       </Flex>

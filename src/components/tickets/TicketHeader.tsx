@@ -17,10 +17,11 @@ import {
     useDisclosure,
     RadioGroup,
     Radio,
+    Image,
 } from '@chakra-ui/react';
 
 import { useMemo, useState } from 'react';
-
+import api from '../../api/apiClient';
 
 // ================= TYPES =================
 
@@ -43,18 +44,20 @@ interface Ticket {
     id: string | number;
     number?: string;
     status: TicketStatus;
-    technician_name?: string | null; // Added to handle assignment logic
-
+    technician_name?: string | null;
     is_breakdown?: boolean;
-
     equipment?: {
         name?: string;
         code?: string;
     };
-
     intervention_type?: {
         id?: string | number;
         name?: string;
+    };
+    permissions?: {
+        can_close?: boolean;
+        can_duplicate?: boolean;
+        [key: string]: any;
     };
 }
 
@@ -72,10 +75,12 @@ type ActionPayload =
 
 interface Props {
     ticket: Ticket;
+    loading?: boolean;
     onBack?: () => void;
     onAction?: (action: TicketAction, payload?: ActionPayload) => void;
+    onDownloadPdf?: () => void;
+    isDownloadingPdf?: boolean;
 }
-
 
 // ================= STATE MACHINE =================
 
@@ -86,7 +91,7 @@ const WORKFLOW: Record<TicketStatus, Partial<Record<TicketAction, boolean>>> = {
     },
     planned: {
         start: true,
-        unassign: true, // L'action est autorisée par le workflow à cet état
+        unassign: true,
         delete: true,
         duplicate: true,
     },
@@ -107,7 +112,6 @@ const WORKFLOW: Record<TicketStatus, Partial<Record<TicketAction, boolean>>> = {
 const can = (status: TicketStatus, action: TicketAction) =>
     !!WORKFLOW[status]?.[action];
 
-
 // ================= STATUS =================
 
 const getStatus = (status: TicketStatus) => {
@@ -120,13 +124,15 @@ const getStatus = (status: TicketStatus) => {
     }
 };
 
-
 // ================= COMPONENT =================
 
 export default function TicketHeader({
     ticket,
+    loading,
     onBack,
     onAction,
+    onDownloadPdf,
+    isDownloadingPdf,
 }: Props) {
 
     const status = getStatus(ticket.status);
@@ -134,13 +140,17 @@ export default function TicketHeader({
     // ===== MODALS =====
     const duplicateModal = useDisclosure();
     const confirmModal = useDisclosure();
+    const qrModal = useDisclosure();
 
+    // ===== STATES =====
     const [duplicateMode, setDuplicateMode] =
         useState<'linked' | 'independent'>('linked');
 
     const [pending, setPending] =
         useState<{ action: TicketAction; payload?: any } | null>(null);
 
+    const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+    const [isGeneratingQr, setIsGeneratingQr] = useState<boolean>(false);
 
     // ================= ACTIONS =================
 
@@ -158,11 +168,9 @@ export default function TicketHeader({
         confirmModal.onClose();
     };
 
-
     // SPECIAL ACTIONS
 
-    const handleStart = () =>
-        requestAction('start');
+    const handleStart = () => requestAction('start');
 
     const handleComplete = () =>
         requestAction('complete', {
@@ -170,38 +178,60 @@ export default function TicketHeader({
             comment: 'Terminé depuis header',
         });
 
-    const handleClose = () =>
-        requestAction('close');
+    const handleClose = () => requestAction('close');
+    const handleDelete = () => requestAction('delete');
+    const handleUnassign = () => requestAction('unassign');
+    const handleDuplicate = () => duplicateModal.onOpen();
 
-    const handleDelete = () =>
-        requestAction('delete');
-
-    const handleUnassign = () =>
-        requestAction('unassign');
-
-    const handleDuplicate = () =>
-        duplicateModal.onOpen();
-
-    const confirmDuplicate = () => {
+    // Remplacez la fonction existante par celle-ci
+    const confirmDuplicate = async () => {
         if (!onAction) return;
 
-        onAction('duplicate', {
+        // On attend la réponse du parent
+        const result = await onAction('duplicate', {
             mode: duplicateMode,
-            intervention_type_id:
-                ticket.intervention_type?.id || null,
+            intervention_type_id: ticket.intervention_type?.id || null,
         });
+
+
+
 
         duplicateModal.onClose();
     };
 
+    const handleShareQr = async () => {
+        if (!ticket?.id) {
+            toast({ title: "ID du ticket introuvable", status: "error" });
+            return;
+        }
+
+        setIsGeneratingQr(true);
+        try {
+            // On utilise ton client 'api' (Axios) à la place de fetch
+            const response = await api.get(`/api/v1/tickets/${ticket.id}/code_qr/`);
+
+            // Avec ton apiClient (Axios), les données JSON sont DIRECTEMENT dans response.data
+            const data = response.data;
+
+            if (data.qr_code_url) {
+                setQrCodeUrl(data.qr_code_url);
+                qrModal.onOpen(); // Ou ta méthode pour ouvrir le modal
+            } else {
+                alert('Erreur lors de la génération du QR Code');
+            }
+        } catch (error: any) {
+            console.error('Erreur Client lors du QR Code:', error);
+            // Si Axios reçoit du HTML ou une 404, il lèvera une erreur propre ici
+            alert(error?.response?.data?.detail || 'Une erreur est survenue lors de la communication avec le serveur.');
+        } finally {
+            setIsGeneratingQr(false);
+        }
+    };
 
     // ================= UI ACTIONS (STATE MACHINE) =================
 
     const actions = useMemo(() => {
-
         const s = ticket.status;
-
-        // Condition stricte : Doit être autorisé par le workflow ET avoir un technicien d'assigné
         const showUnassign = can(s, 'unassign') && !!ticket.technician_name;
 
         return [
@@ -230,25 +260,23 @@ export default function TicketHeader({
                 key: 'unassign' as TicketAction,
                 label: 'Désassigner',
                 color: 'red',
-                variant: 'outline', // Optionnel : pour le différencier visuellement
+                variant: 'outline',
                 show: showUnassign,
                 onClick: handleUnassign,
             },
         ].filter(a => a.show);
-
     }, [ticket.status, ticket.technician_name]);
 
+    const showDownloadBtn = ticket.permissions?.can_close || ticket.permissions?.can_duplicate;
 
     // ================= RENDER =================
 
     return (
         <Box bg="white" borderBottom="1px solid" borderColor="gray.100" p={4}>
-
             <Flex justify="space-between" align="center">
 
                 {/* LEFT */}
                 <VStack align="start" spacing={1}>
-
                     <HStack>
                         <Text fontSize="lg" fontWeight="bold">
                             Ticket {ticket.number || ticket.id}
@@ -266,20 +294,44 @@ export default function TicketHeader({
                     <Text fontSize="sm" color="gray.500">
                         {ticket.equipment?.name || 'Équipement'}
                     </Text>
-                    
-
-                    
-
                 </VStack>
-
 
                 {/* RIGHT ACTIONS */}
                 <HStack spacing={3} flexWrap="wrap">
 
                     {onBack && (
-                        <Button size="sm" variant="ghost" onClick={onBack}>
+                        <Button size="sm" variant="ghost" onClick={onBack} isDisabled={loading || isDownloadingPdf || isGeneratingQr}>
                             Retour
                         </Button>
+                    )}
+
+                    {/* PDF ACTIONS */}
+                    {showDownloadBtn && onDownloadPdf && (
+                        <>
+                            <Button
+                                size="sm"
+                                colorScheme="blue"
+                                variant="outline"
+                                isLoading={isDownloadingPdf}
+                                loadingText="Génération..."
+                                onClick={onDownloadPdf}
+                                isDisabled={loading || isGeneratingQr}
+                            >
+                                Télécharger PDF
+                            </Button>
+
+                            <Button
+                                size="sm"
+                                colorScheme="purple"
+                                variant="solid"
+                                isLoading={isGeneratingQr}
+                                loadingText="Création..."
+                                onClick={handleShareQr}
+                                isDisabled={loading || isDownloadingPdf}
+                            >
+                                Partager QR
+                            </Button>
+                        </>
                     )}
 
                     {/* STATIC ACTIONS */}
@@ -289,6 +341,7 @@ export default function TicketHeader({
                             colorScheme="purple"
                             variant="outline"
                             onClick={handleDuplicate}
+                            isDisabled={loading || isDownloadingPdf || isGeneratingQr}
                         >
                             Dupliquer
                         </Button>
@@ -300,6 +353,7 @@ export default function TicketHeader({
                             colorScheme="red"
                             variant="outline"
                             onClick={handleDelete}
+                            isDisabled={loading || isDownloadingPdf || isGeneratingQr}
                         >
                             Supprimer
                         </Button>
@@ -311,98 +365,104 @@ export default function TicketHeader({
                             key={a.key}
                             size="sm"
                             colorScheme={a.color}
-                            variant={a.key === 'unassign' ? 'outline' : 'solid'}
+                            variant={a.variant || 'solid'}
                             onClick={a.onClick}
+                            isDisabled={loading || isDownloadingPdf || isGeneratingQr}
                         >
                             {a.label}
                         </Button>
                     ))}
-
                 </HStack>
-
             </Flex>
 
             <Divider mt={3} />
 
-
             {/* ================= DUPLICATION MODAL ================= */}
             <Modal isOpen={duplicateModal.isOpen} onClose={duplicateModal.onClose} isCentered>
-
                 <ModalOverlay />
-
                 <ModalContent>
-
                     <ModalHeader>Dupliquer le ticket</ModalHeader>
-
                     <ModalCloseButton />
-
                     <ModalBody>
-
                         <RadioGroup
                             value={duplicateMode}
                             onChange={(v) => setDuplicateMode(v as any)}
                         >
-
                             <VStack spacing={3}>
-
-                                <Box borderWidth="1px" p={3} borderRadius="md">
+                                <Box borderWidth="1px" p={3} borderRadius="md" w="100%">
                                     <Radio value="linked">Ticket lié</Radio>
                                 </Box>
-
-                                <Box borderWidth="1px" p={3} borderRadius="md">
+                                <Box borderWidth="1px" p={3} borderRadius="md" w="100%">
                                     <Radio value="independent">Indépendant</Radio>
                                 </Box>
-
                             </VStack>
-
                         </RadioGroup>
-
                     </ModalBody>
-
                     <ModalFooter>
-                        <Button variant="ghost" onClick={duplicateModal.onClose}>
+                        <Button variant="ghost" onClick={duplicateModal.onClose} mr={3}>
                             Annuler
                         </Button>
-
                         <Button colorScheme="purple" onClick={confirmDuplicate}>
                             Confirmer
                         </Button>
                     </ModalFooter>
-
                 </ModalContent>
-
             </Modal>
-
 
             {/* ================= CONFIRMATION MODAL ================= */}
             <Modal isOpen={confirmModal.isOpen} onClose={confirmModal.onClose} isCentered>
-
                 <ModalOverlay />
-
                 <ModalContent>
-
                     <ModalHeader>Confirmation</ModalHeader>
-
                     <ModalBody>
                         <Text>
                             Confirmer l'action : <b>{pending?.action === 'unassign' ? 'Désassigner' : pending?.action}</b> ?
                         </Text>
                     </ModalBody>
-
                     <ModalFooter>
-                        <Button variant="ghost" onClick={confirmModal.onClose}>
+                        <Button variant="ghost" onClick={confirmModal.onClose} mr={3}>
                             Annuler
                         </Button>
-
                         <Button colorScheme="red" onClick={confirmAction}>
                             Confirmer
                         </Button>
                     </ModalFooter>
-
                 </ModalContent>
-
             </Modal>
 
+            {/* ================= QR CODE MODAL ================= */}
+            <Modal isOpen={qrModal.isOpen} onClose={qrModal.onClose} isCentered>
+                <ModalOverlay backdropFilter="blur(4px)" />
+                <ModalContent mx={4}>
+                    <ModalHeader textAlign="center">Scanner pour télécharger</ModalHeader>
+                    <ModalCloseButton />
+                    <ModalBody pb={6}>
+                        <VStack spacing={4} textAlign="center">
+                            <Text fontSize="sm" color="gray.500">
+                                Ce QR code donne un accès direct et sécurisé au téléchargement du document PDF.
+                            </Text>
+
+                            {qrCodeUrl && (
+                                <Image
+                                    boxSize="200px"
+                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrCodeUrl)}`}
+                                    alt="QR Code de téléchargement"
+                                    fallbackSrc="https://via.placeholder.com/200"
+                                />
+                            )}
+
+                            <Text fontSize="xs" fontWeight="bold" color="red.500" bg="red.50" px={3} py={1} borderRadius="full">
+                                Valide pendant 2 heures uniquement
+                            </Text>
+                        </VStack>
+                    </ModalBody>
+                    <ModalFooter justifyContent="center">
+                        <Button colorScheme="blue" onClick={qrModal.onClose} size="sm">
+                            Fermer
+                        </Button>
+                    </ModalFooter>
+                </ModalContent>
+            </Modal>
         </Box>
     );
 }

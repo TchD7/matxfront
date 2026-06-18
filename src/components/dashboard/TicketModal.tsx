@@ -37,7 +37,8 @@ interface InterventionType {
 interface TicketModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSuccess: () => void;
+    // onSuccess receives the created ticket id when available
+    onSuccess: (createdId?: string | number) => void;
 }
 
 export default function TicketModal({
@@ -133,10 +134,14 @@ export default function TicketModal({
 
         try {
             setLoading(true);
-            await api.post('/api/v1/tickets/', payload);
+            const res = await api.post('/api/v1/tickets/', payload);
+
+            // Normaliser réponse et extraire l'ID
+            const created = res.data?.data || res.data || {};
+            const createdId = created.id ?? created.pk ?? created.ticket_number ?? null;
 
             toast({ title: 'Ticket créé avec succès', status: 'success' });
-            onSuccess();
+            onSuccess(createdId ?? undefined);
             onClose();
         } catch (error: any) {
             console.error("Erreur API :", error.response?.data);

@@ -1,14 +1,20 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Dashboard from "./pages/Dashboard";
-import LoginPage from "./pages/LoginPage";
-import LoginPassword from "./components/forms/LoginPassword";
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+
+import Dashboard from './pages/Dashboard';
+import LoginPage from './pages/LoginPage';
+import LoginPassword from './components/forms/LoginPassword';
 import ResetPassword from './components/forms/ResetPassword';
 import ResetPasswordToken from './components/forms/ResetPasswordToken';
 import AcceptInvitation from './pages/AcceptInvitation';
 import TicketDetailPage from './pages/TicketDetailPage';
+
 import InternetDetector from './components/forms/InternetDetector';
 import AuthGuard from './components/AuthGuard';
-import { useEffect } from 'react';
+
+import DashboardHome from './components/dashboard/DashboardHome';
+import TicketManager from './components/dashboard/TicketManager';
+
 import { updateApiBaseURL } from './api/apiClient';
 
 function App() {
@@ -16,26 +22,28 @@ function App() {
     const tenant = localStorage.getItem('tenant_api_url');
 
     if (tenant) {
-      //console.log('🏢 Restoration tenant App boot:', tenant);
       updateApiBaseURL(tenant);
-    } else {
-      //console.log('📍 Aucun tenant → backend central');
     }
   }, []);
 
   return (
     <Router>
       <InternetDetector />
+
       <Routes>
-        {/* Routes publiques */}
+        {/* ==========================
+            ROUTES PUBLIQUES
+        ========================== */}
         <Route path="/" element={<LoginPage />} />
         <Route path="/login-password" element={<LoginPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/reset-password-token" element={<ResetPasswordToken />} />
         <Route path="/accept-invitation/:token" element={<AcceptInvitation />} />
 
+        {/* ==========================
+            DASHBOARD PROTÉGÉ
+        ========================== */}
 
-        {/* Routes protégées - accessibles uniquement si l'utilisateur est authentifié */}
         <Route
           path="/dashboard"
           element={
@@ -45,9 +53,8 @@ function App() {
           }
         />
 
-        {/* Route détail ticket */}
         <Route
-          path="/tickets/:id"
+          path="/dashboard/tickets/:id"
           element={
             <AuthGuard>
               <TicketDetailPage />
@@ -55,6 +62,10 @@ function App() {
           }
         />
 
+        {/* ==========================
+            FALLBACK
+        ========================== */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );

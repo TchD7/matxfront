@@ -143,7 +143,6 @@ export default function TicketLogsTab({
         if (ticket?.id) {
             fetchLogs();
         }
-
     }, [ticket?.id]);
 
     // ================= SORT =================
