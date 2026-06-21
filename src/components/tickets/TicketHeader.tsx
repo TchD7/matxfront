@@ -162,10 +162,21 @@ export default function TicketHeader({
     const confirmAction = () => {
         if (!onAction || !pending) return;
 
+        // 1. On stocke l'action locale pour savoir ce qui vient d'être lancé
+        const currentAction = pending.action;
+
+        // 2. On exécute l'action (l'appel API se fait dans le composant parent)
         onAction(pending.action, pending.payload);
 
+        // 3. On nettoie les états du modal
         setPending(null);
         confirmModal.onClose();
+
+
+        // pour éviter que le composant ne tente de recharger le ticket fantôme
+        if (currentAction === 'delete' && onBack) {
+            onBack();
+        }
     };
 
     // SPECIAL ACTIONS
@@ -358,6 +369,17 @@ export default function TicketHeader({
                             Supprimer
                         </Button>
                     )}
+                    {can(ticket.status, 'close') && (
+                        <Button
+                            size="sm"
+                            colorScheme="red"
+                            variant="outline"
+                            onClick={handleClose}
+                            isDisabled={loading || isDownloadingPdf || isGeneratingQr}
+                        >
+                            Valider
+                        </Button>
+                    )}
 
                     {/* STATE MACHINE ACTIONS */}
                     {actions.map(a => (
@@ -423,7 +445,10 @@ export default function TicketHeader({
                         <Button variant="ghost" onClick={confirmModal.onClose} mr={3}>
                             Annuler
                         </Button>
-                        <Button colorScheme="red" onClick={confirmAction}>
+                        <Button
+                            colorScheme={pending?.action === 'delete' || pending?.action === 'unassign' ? 'red' : 'blue'}
+                            onClick={confirmAction}
+                        >
                             Confirmer
                         </Button>
                     </ModalFooter>
@@ -434,12 +459,12 @@ export default function TicketHeader({
             <Modal isOpen={qrModal.isOpen} onClose={qrModal.onClose} isCentered>
                 <ModalOverlay backdropFilter="blur(4px)" />
                 <ModalContent mx={4}>
-                    <ModalHeader textAlign="center">Scanner pour télécharger</ModalHeader>
+                    <ModalHeader textAlign="center">Scanner pour télécharger le pdf</ModalHeader>
                     <ModalCloseButton />
                     <ModalBody pb={6}>
                         <VStack spacing={4} textAlign="center">
                             <Text fontSize="sm" color="gray.500">
-                                Ce QR code donne un accès direct et sécurisé au téléchargement du document PDF.
+
                             </Text>
 
                             {qrCodeUrl && (
@@ -451,7 +476,7 @@ export default function TicketHeader({
                                 />
                             )}
 
-                            <Text fontSize="xs" fontWeight="bold" color="red.500" bg="red.50" px={3} py={1} borderRadius="full">
+                            <Text fontSize="xs" fontWeight="bold" color="red.200" bg="red.50" px={2} py={1} borderRadius="full">
                                 Valide pendant 2 heures uniquement
                             </Text>
                         </VStack>

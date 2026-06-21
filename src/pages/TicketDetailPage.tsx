@@ -76,11 +76,6 @@ export interface Ticket {
     ui?: TicketUI;
 }
 
-interface TicketDetailPageProps {
-    ticketId?: string | number | null;
-    onBack?: () => void;
-}
-
 // ======================================================
 // CUSTOM HOOKS
 // ======================================================
@@ -104,7 +99,7 @@ const useTicketActions = (
     user: any,
     queryClient: any,
     toast: ReturnType<typeof useToast>,
-    navigate: any,
+    navigate: ReturnType<typeof useNavigate>,
     onBack?: () => void
 ) => {
     const actionMutation = useMutation({
@@ -139,7 +134,7 @@ const useTicketActions = (
 
             if (variables.action === 'delete') {
                 toast({ title: 'Ticket supprimé', status: 'success', duration: 3000, isClosable: true });
-                onBack ? onBack() : navigate(-1);
+                onBack ? onBack() : navigate('/dashboard/tickets');
                 return;
             }
 
@@ -152,7 +147,7 @@ const useTicketActions = (
                     duration: 4000,
                     isClosable: true,
                 });
-                navigate(`/tickets/${newTicket.id}`);
+                navigate(`/dashboard/tickets/${newTicket.id}`);
                 return;
             }
 
@@ -268,77 +263,87 @@ const TicketError = ({ error }: { error: any }) => (
 // COMPOSANT PRINCIPAL
 // ======================================================
 
-export default function TicketDetailPage({ ticketId, onBack }: TicketDetailPageProps) {
-    const { id } = useParams();
+export default function TicketDetailPage() {
+    const { id } = useParams(); // Récupère directement l'ID depuis l'URL
     const navigate = useNavigate();
     const toast = useToast();
     const queryClient = useQueryClient();
     const { user } = useAuth();
 
-    const effectiveTicketId = ticketId ?? id;
+    const { data: ticket, isLoading, isError, error, refetch } = useTicket(id);
 
-    const { data: ticket, isLoading, isError, error, refetch } = useTicket(effectiveTicketId);
-    const { handleAction, isPending } = useTicketActions(ticket, user, queryClient, toast, navigate, onBack);
+    // On s'assure que toutes les actions pointent sur le routage du Dashboard
+    const { handleAction, isPending } = useTicketActions(
+        ticket,
+        user,
+        queryClient,
+        toast,
+        navigate,
+        () => navigate('/dashboard/tickets')
+    );
 
-    // Initialisation du hook PDF
     const { downloadPdf, isDownloading } = useDownloadPdf(toast);
 
     const tabs = useMemo(() => ticket ? buildTabs(ticket, refetch) : [], [ticket, refetch]);
 
-    if (!effectiveTicketId) {
-        return <Center h="80vh"><Text>Aucun ticket sélectionné.</Text></Center>;
+    if (!id) {
+        return <Center h="100%"><Text>Aucun ticket sélectionné.</Text></Center>;
     }
 
     if (isLoading) return <TicketSkeleton />;
     if (isError) return <TicketError error={error} />;
     if (!ticket) return null;
 
-    // Modification ici : Le formulaire ne s'affiche que s'il peut être assigné ET qu'aucun technicien n'est encore assigné
     const showPlanningForm = ticket.permissions?.can_assign && !ticket.technician_name;
 
     return (
-        <Box bg="gray.50" minH="100vh">
+        <Box w="full">
             <TicketHeader
                 ticket={ticket}
                 loading={isPending}
-                onBack={() => (onBack ? onBack() : navigate(-1))}
+                onBack={() => navigate('/dashboard/tickets')} // Retour formel et sécurisé
                 onAction={handleAction}
-                // Nouveaux props passés au header
                 onDownloadPdf={() => downloadPdf(ticket.id, ticket.number)}
                 isDownloadingPdf={isDownloading}
             />
 
-            <Box p={6}>
-                <VStack align="stretch" spacing={6}>
+            <VStack align="stretch" spacing={6} mt={6}>
+                <TicketStatusDetail ticket={ticket} />
 
-                    <TicketStatusDetail ticket={ticket} />
+                {showPlanningForm && (
+                    <TicketPlanningForm
+                        ticketId={ticket.id}
+                        currentStatus={ticket.status}
+                        onPlanningComplete={() => refetch()}
+                    />
+                )}
 
-                    {showPlanningForm && (
-                        <TicketPlanningForm
-                            ticketId={ticket.id}
-                            currentStatus={ticket.status}
-                            onPlanningComplete={() => refetch()}
-                        />
-                    )}
+                <Tabs
+                    variant="enclosed"
+                    colorScheme="purple"
+                    bg="white"
+                    p={4}
+                    borderRadius="lg"
+                    border="1px solid"
+                    borderColor="gray.200"
+                    shadow="sm"
+                    isLazy
+                >
+                    <TabList>
+                        {tabs.map((tab) => (
+                            <Tab key={tab.key} fontWeight="semibold">{tab.label}</Tab>
+                        ))}
+                    </TabList>
 
-                    <Tabs variant="enclosed" colorScheme="purple" bg="white" p={4} borderRadius="lg" shadow="sm" isLazy>
-                        <TabList>
-                            {tabs.map((tab) => (
-                                <Tab key={tab.key} fontWeight="semibold">{tab.label}</Tab>
-                            ))}
-                        </TabList>
-
-                        <TabPanels>
-                            {tabs.map((tab) => (
-                                <TabPanel key={tab.key} px={0} pt={4}>
-                                    {tab.content}
-                                </TabPanel>
-                            ))}
-                        </TabPanels>
-                    </Tabs>
-
-                </VStack>
-            </Box>
+                    <TabPanels>
+                        {tabs.map((tab) => (
+                            <TabPanel key={tab.key} px={0} pt={4}>
+                                {tab.content}
+                            </TabPanel>
+                        ))}
+                    </TabPanels>
+                </Tabs>
+            </VStack>
         </Box>
     );
 }

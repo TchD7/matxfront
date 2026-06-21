@@ -16,6 +16,7 @@ import {
     StatNumber,
     Text,
     VStack,
+    Heading
 } from '@chakra-ui/react';
 import { useMemo, type ComponentType } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -26,21 +27,25 @@ import {
     FiCheckCircle,
     FiClock,
     FiPlay,
+    FiPauseCircle
 } from 'react-icons/fi';
-import { formatDateTime } from '../../utils/userUtils';
-import type { User } from '../types/user.types';
 
-interface TicketStatusDetailProps {
+// Imports des nouveaux composants métier créés précédemment
+import { TicketDelayBadge } from './TicketDelayBadge';
+import { TicketActionButtons } from './TicketActionButtons';
+import { TicketWorkStats } from './TicketWorkStats';
+
+import { formatDuration } from './types/ticket'; // L'utilitaire centralisé
+
+export interface TicketStatusDetailProps {
     ticket: {
         id: string | number;
         status: string;
         created_at: string;
-        actual_duration?: number | null;
-        estimated_duration?: number | null;
-        is_late?: boolean | null;
         started_at?: string | null;
+        ended_at?: string | null;
+        planned_at?: string | null;
         is_breakdown?: boolean;
-        late_duration_minutes?: number | null;
         priority?: string | null;
         equipment?: {
             name?: string;
@@ -54,37 +59,17 @@ interface TicketStatusDetailProps {
         intervention_type?: {
             name?: string;
         } | null;
-        planned_at?: string | null;
-        ended_at?: string | null;
+
+        // --- Nouveaux champs backend ---
+        is_late?: boolean;
+        start_delay_minutes?: number | null;
+        late_duration_minutes?: number | null;
+        total_work_minutes?: number;
+        pause_minutes?: number;
+        pause_count?: number;
+        logs?: any[];
     };
 }
-
-const formatDuration = (minutes?: number | null) => {
-    if (minutes === undefined || minutes === null || minutes === 0) {
-        return "Non spécifiée";
-    }
-
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-
-    if (hours > 0) {
-        return `${hours}h ${mins > 0 ? mins + 'min' : ''}`;
-    }
-    return `${mins}min`;
-};
-
-const formatDelay = (minutes?: number | null) => {
-    if (minutes == null || minutes <= 0) {
-        return '0 min';
-    }
-
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-
-    return [hours > 0 ? `${hours} h` : null, `${remainingMinutes} min`]
-        .filter(Boolean)
-        .join(' ');
-};
 
 const getPriorityColor = (priority?: string | null) => {
     switch (priority?.toLowerCase()) {
@@ -150,7 +135,7 @@ const getStatusConfig = (status?: string) => {
                 label: 'Planifié',
                 color: 'purple',
                 progress: 20,
-                description: 'Le ticket est planifié et attend le démarrage.',
+                description: 'Le ticket est planifié.',
             };
         case 'in_progress':
         case 'in progress':
@@ -160,6 +145,14 @@ const getStatusConfig = (status?: string) => {
                 color: 'blue',
                 progress: 60,
                 description: 'Le ticket est en cours de traitement.',
+            };
+        case 'paused':
+            return {
+                icon: FiPauseCircle,
+                label: 'En pause',
+                color: 'yellow',
+                progress: 60,
+                description: "L'intervention est actuellement en pause.",
             };
         case 'completed':
             return {
@@ -202,48 +195,13 @@ function FieldRenderer({ field }: FieldRendererProps) {
     );
 }
 
-export default function TicketStatusDetail({
-    ticket,
-}: TicketStatusDetailProps) {
-
+export default function TicketStatusDetail({ ticket }: TicketStatusDetailProps) {
     // =========================================================
     // STATUS CONFIG
     // =========================================================
 
-    const statusConfig = useMemo(
-        () => getStatusConfig(ticket.status),
-        [ticket.status]
-    );
-
+    const statusConfig = useMemo(() => getStatusConfig(ticket.status), [ticket.status]);
     const StatusIcon = statusConfig.icon as ComponentType;
-
-    // =========================================================
-    // DURATION
-    // =========================================================
-
-    const hasActualDuration =
-        ticket.actual_duration !== null &&
-        ticket.actual_duration !== undefined;
-
-    const durationToDisplay = hasActualDuration
-        ? ticket.actual_duration
-        : ticket.estimated_duration;
-
-    // =========================================================
-    // LATE CALCULATIONS
-    // =========================================================
-
-    const normalizedStatus = ticket.status?.toLowerCase();
-
-    const isLate =
-        ticket.is_late === true &&
-        !['completed', 'closed', 'draft'].includes(
-            normalizedStatus
-        );
-
-    const showLateDuration =
-        isLate &&
-        Boolean(ticket.started_at);
 
     // =========================================================
     // DYNAMIC FORM
@@ -255,15 +213,10 @@ export default function TicketStatusDetail({
         error,
     } = useQuery({
         queryKey: ['ticket-form', ticket.id],
-
         queryFn: async () => {
-            const response = await axios.get(
-                `/api/v1/tickets/${ticket.id}/render/`
-            );
-
+            const response = await axios.get(`/api/v1/tickets/${ticket.id}/render/`);
             return response.data;
         },
-
         enabled: Boolean(ticket.id),
         staleTime: 1000 * 60 * 5,
     });
@@ -273,12 +226,7 @@ export default function TicketStatusDetail({
     // =========================================================
 
     return (
-        <VStack
-            spacing={6}
-            align="stretch"
-            width="100%"
-        >
-
+        <VStack spacing={6} align="stretch" width="100%">
             {/* ================================================= */}
             {/* STATUS DETAIL */}
             {/* ================================================= */}
@@ -291,378 +239,146 @@ export default function TicketStatusDetail({
                 border="1px solid"
                 borderColor="gray.100"
             >
-                <VStack
-                    align="stretch"
-                    spacing={6}
-                >
-
-                    {/* HEADER */}
-
-                    <HStack
-                        justify="space-between"
-                        align="flex-start"
-                    >
-                        <HStack
-                            spacing={4}
-                            align="flex-start"
-                        >
+                <VStack align="stretch" spacing={6}>
+                    <HStack justify="space-between" align="flex-start" wrap="wrap" gap={4}>
+                        <HStack spacing={4} align="flex-start">
                             <Box
                                 p={3}
                                 borderRadius="full"
                                 bg={`${statusConfig.color}.50`}
                                 color={`${statusConfig.color}.600`}
                             >
-                                <Icon
-                                    as={StatusIcon}
-                                    fontSize="xl"
-                                />
+                                <Icon as={StatusIcon} fontSize="xl" />
                             </Box>
 
-                            <VStack
-                                align="flex-start"
-                                spacing={1}
-                            >
-                                <HStack
-                                    spacing={2}
-                                    flexWrap="wrap"
-                                >
-                                    <Text
-                                        fontSize="lg"
-                                        fontWeight="bold"
-                                    >
-                                        Statut :
-                                        {' '}
-                                        {statusConfig.label}
+                            <VStack align="flex-start" spacing={1}>
+                                <HStack spacing={2} flexWrap="wrap">
+                                    <Text fontSize="lg" fontWeight="bold">
+                                        Statut : {statusConfig.label}
                                     </Text>
 
                                     {ticket.is_breakdown && (
-                                        <Badge
-                                            colorScheme="red"
-                                        >
+                                        <Badge colorScheme="red" variant="solid">
                                             Panne
                                         </Badge>
                                     )}
 
-                                    {isLate && (
-                                        <Badge
-                                            colorScheme="orange"
-                                        >
-                                            En retard
-                                        </Badge>
-                                    )}
-
-                                    {showLateDuration &&
-                                        typeof ticket.late_duration_minutes ===
-                                        'number' && (
-                                            <Badge
-                                                colorScheme="red"
-                                            >
-                                                Retard :
-                                                {' '}
-                                                {formatDelay(
-                                                    ticket.late_duration_minutes
-                                                )}
-                                            </Badge>
-                                        )}
+                                    {/* Nouveau composant gérant l'affichage exclusif des retards */}
+                                    <TicketDelayBadge ticket={ticket as any} />
                                 </HStack>
 
-                                <Text
-                                    fontSize="sm"
-                                    color="gray.600"
-                                >
-                                    {
-                                        statusConfig.description
-                                    }
+                                <Text fontSize="sm" color="gray.600">
+                                    {statusConfig.description}
                                 </Text>
                             </VStack>
                         </HStack>
 
-                        {ticket.priority && (
-                            <Badge
-                                colorScheme={getPriorityColor(
-                                    ticket.priority
-                                )}
-                                px={3}
-                                py={1}
-                            >
-                                Priorité :
-                                {' '}
-                                {ticket.priority}
-                            </Badge>
-                        )}
+                        <HStack spacing={3}>
+                            {ticket.priority && (
+                                <Badge
+                                    colorScheme={getPriorityColor(ticket.priority)}
+                                    px={3}
+                                    py={1}
+                                >
+                                    Priorité : {ticket.priority}
+                                </Badge>
+                            )}
+
+                            {/* Boutons d'action Pause / Reprise avec leurs modals */}
+                            <TicketActionButtons ticket={ticket as any} />
+                        </HStack>
                     </HStack>
 
                     {/* PROGRESS */}
-
                     <Box>
-                        <HStack
-                            justify="space-between"
-                            mb={2}
-                        >
-                            <Text
-                                fontSize="sm"
-                                fontWeight="medium"
-                            >
+                        <HStack justify="space-between" mb={2}>
+                            <Text fontSize="sm" fontWeight="medium">
                                 Progression
                             </Text>
-
-                            <Text
-                                fontSize="sm"
-                                color="gray.600"
-                            >
+                            <Text fontSize="sm" color="gray.600">
                                 {statusConfig.progress}%
                             </Text>
                         </HStack>
 
                         <Progress
                             value={statusConfig.progress}
-                            colorScheme={getProgressColor(
-                                statusConfig.progress
-                            )}
+                            colorScheme={getProgressColor(statusConfig.progress)}
                             size="lg"
                             borderRadius="full"
                         />
                     </Box>
 
-                    {/* METRICS */}
-
-                    <SimpleGrid
-                        columns={{
-                            base: 1,
-                            md: 3,
-                        }}
-                        spacing={4}
-                    >
+                    {/* METRICS DE BASE */}
+                    <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
                         <Stat>
-                            <StatLabel>
-                                Équipement
-                            </StatLabel>
-
-                            <StatNumber
-                                fontSize="md"
-                            >
-                                {ticket.equipment?.name ??
-                                    'N/A'}
+                            <StatLabel>Équipement</StatLabel>
+                            <StatNumber fontSize="md">
+                                {ticket.equipment?.name ?? 'N/A'}
                             </StatNumber>
-
                             <StatHelpText>
-                                {ticket.equipment?.code ??
-                                    'Aucun code'}
+                                {ticket.equipment?.code ?? 'Aucun code'}
                             </StatHelpText>
                         </Stat>
 
                         <Stat>
-                            <StatLabel>
-                                Technicien
-                            </StatLabel>
-
-                            <StatNumber
-                                fontSize="md"
-                            >
-                                {ticket.technician_name ??
-                                    'Non assigné'}
+                            <StatLabel>Technicien</StatLabel>
+                            <StatNumber fontSize="md">
+                                {ticket.technician_name ?? 'Non assigné'}
                             </StatNumber>
-
                             <StatHelpText>
-                                {ticket.intervention_type
-                                    ?.name ??
-                                    'Non défini'}
-                            </StatHelpText>
-                        </Stat>
-
-                        <Stat>
-                            <StatLabel>
-                                Durée
-                            </StatLabel>
-
-                            <StatNumber
-                                fontSize="md"
-                            >
-                                {formatDuration(
-                                    durationToDisplay
-                                )}
-                            </StatNumber>
-
-                            <StatHelpText>
-                                {hasActualDuration
-                                    ? 'Réelle'
-                                    : 'Estimée'}
+                                {ticket.intervention_type?.name ?? 'Non défini'}
                             </StatHelpText>
                         </Stat>
                     </SimpleGrid>
 
-                    {/* EQUIPMENT */}
+                    <Divider />
 
+                    {/* TEMPS D'INTERVENTION (Nouveaux KPIs) */}
+                    <Box>
+                        <Heading size="sm" mb={4} color="gray.700">
+                            Performances & Temps d'intervention
+                        </Heading>
+                        <TicketWorkStats ticket={ticket as any} />
+                    </Box>
+
+                    {/* EQUIPMENT (Détails) */}
                     {ticket.equipment && (
                         <>
                             <Divider />
-
-                            <SimpleGrid
-                                columns={{
-                                    base: 1,
-                                    md: 2,
-                                    lg: 3,
-                                }}
-                                spacing={4}
-                            >
+                            <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
                                 <Stat>
-                                    <StatLabel>
-                                        Nom
-                                    </StatLabel>
-
-                                    <StatNumber
-                                        fontSize="md"
-                                    >
-                                        {
-                                            ticket
-                                                .equipment
-                                                .name
-                                        }
-                                    </StatNumber>
+                                    <StatLabel>Nom</StatLabel>
+                                    <StatNumber fontSize="md">{ticket.equipment.name}</StatNumber>
                                 </Stat>
-
                                 <Stat>
-                                    <StatLabel>
-                                        Code
-                                    </StatLabel>
-
-                                    <StatNumber
-                                        fontSize="md"
-                                    >
-                                        {
-                                            ticket
-                                                .equipment
-                                                .code
-                                        }
-                                    </StatNumber>
+                                    <StatLabel>Code</StatLabel>
+                                    <StatNumber fontSize="md">{ticket.equipment.code}</StatNumber>
                                 </Stat>
-
                                 <Stat>
-                                    <StatLabel>
-                                        Criticité
-                                    </StatLabel>
-
+                                    <StatLabel>Criticité</StatLabel>
                                     <Box mt={2}>
-                                        <Badge
-                                            colorScheme={getCriticalityColor(
-                                                ticket
-                                                    .equipment
-                                                    .criticality
-                                            )}
-                                        >
-                                            {getCriticalityLabel(
-                                                ticket
-                                                    .equipment
-                                                    .criticality
-                                            )}
+                                        <Badge colorScheme={getCriticalityColor(ticket.equipment.criticality)}>
+                                            {getCriticalityLabel(ticket.equipment.criticality)}
                                         </Badge>
                                     </Box>
                                 </Stat>
-
                                 <Stat>
-                                    <StatLabel>
-                                        Emplacement
-                                    </StatLabel>
-
-                                    <StatNumber
-                                        fontSize="md"
-                                    >
-                                        {
-                                            ticket
-                                                .equipment
-                                                .emplacement
-                                        }
-                                    </StatNumber>
+                                    <StatLabel>Emplacement</StatLabel>
+                                    <StatNumber fontSize="md">{ticket.equipment.emplacement}</StatNumber>
                                 </Stat>
-
                                 <Stat>
-                                    <StatLabel>
-                                        Série
-                                    </StatLabel>
-
-                                    <StatNumber
-                                        fontSize="md"
-                                    >
-                                        {
-                                            ticket
-                                                .equipment
-                                                .series
-                                        }
-                                    </StatNumber>
+                                    <StatLabel>Série</StatLabel>
+                                    <StatNumber fontSize="md">{ticket.equipment.series}</StatNumber>
                                 </Stat>
-
                                 <Stat>
-                                    <StatLabel>
-                                        Marque
-                                    </StatLabel>
-
-                                    <StatNumber
-                                        fontSize="md"
-                                    >
-                                        {
-                                            ticket
-                                                .equipment
-                                                .marque
-                                        }
-                                    </StatNumber>
+                                    <StatLabel>Marque</StatLabel>
+                                    <StatNumber fontSize="md">{ticket.equipment.marque}</StatNumber>
                                 </Stat>
                             </SimpleGrid>
                         </>
                     )}
 
-                    {/* TIMELINE */}
 
-                    {(ticket.planned_at ||
-                        ticket.started_at ||
-                        ticket.ended_at) && (
-                            <>
-                                <Divider />
-
-                                <VStack
-                                    align="stretch"
-                                    spacing={3}
-                                >
-                                    {ticket.created_at && (
-                                        <Text>
-                                            Créé :
-                                            {' '}
-                                            {formatDateTime(
-                                                ticket.created_at
-                                            )}
-                                        </Text>
-                                    )}
-                                    {ticket.planned_at && (
-                                        <Text>
-                                            Planifié :
-                                            {' '}
-                                            {formatDateTime(
-                                                ticket.planned_at
-                                            )}
-                                        </Text>
-                                    )}
-
-                                    {ticket.started_at && (
-                                        <Text>
-                                            Démarré :
-                                            {' '}
-                                            {formatDateTime(
-                                                ticket.started_at
-                                            )}
-                                        </Text>
-                                    )}
-
-                                    {ticket.ended_at && (
-                                        <Text>
-                                            Terminé :
-                                            {' '}
-                                            {formatDateTime(
-                                                ticket.ended_at
-                                            )}
-                                        </Text>
-                                    )}
-                                </VStack>
-                            </>
-                        )}
                 </VStack>
             </Box>
 
@@ -675,9 +391,9 @@ export default function TicketStatusDetail({
                     <Spinner />
                 </Center>
             ) : error ? (
-                <Alert status="error">
+                <Alert status="error" borderRadius="md">
                     <AlertIcon />
-                    Impossible de charger le formulaire.
+                    Impossible de charger le formulaire d'intervention.
                 </Alert>
             ) : (
                 Array.isArray(dynamicForm) &&
@@ -688,47 +404,22 @@ export default function TicketStatusDetail({
                         p={6}
                         borderRadius="xl"
                         shadow="sm"
+                        border="1px solid"
+                        borderColor="gray.100"
                     >
-                        <Text
-                            fontWeight="bold"
-                            mb={4}
-                        >
+                        <Text fontWeight="bold" mb={4} color="gray.800">
                             {section.section_title}
                         </Text>
 
-                        <SimpleGrid
-                            columns={{
-                                base: 1,
-                                md: 2,
-                            }}
-                            spacing={4}
-                        >
-                            {section.fields?.map(
-                                (field: any) => (
-                                    <Box
-                                        key={field.id}
-                                    >
-                                        <Text
-                                            fontSize="xs"
-                                            fontWeight="bold"
-                                            mb={1}
-                                        >
-                                            {
-                                                field.label
-                                            }
-                                        </Text>
-
-                                        <FieldRenderer
-                                            ticketId={
-                                                ticket.id
-                                            }
-                                            field={
-                                                field
-                                            }
-                                        />
-                                    </Box>
-                                )
-                            )}
+                        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+                            {section.fields?.map((field: any) => (
+                                <Box key={field.id}>
+                                    <Text fontSize="xs" fontWeight="bold" color="gray.500" textTransform="uppercase" mb={1}>
+                                        {field.label}
+                                    </Text>
+                                    <FieldRenderer ticketId={ticket.id} field={field} />
+                                </Box>
+                            ))}
                         </SimpleGrid>
                     </Box>
                 ))

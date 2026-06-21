@@ -12,8 +12,7 @@ import {
 } from '@chakra-ui/react';
 
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Outlet } from 'react-router-dom';
+import { useNavigate, useSearchParams, Outlet, useLocation } from 'react-router-dom';
 
 import api, { logout as apiLogout } from '../api/apiClient';
 import { useAuth } from '../hooks/useAuth';
@@ -22,64 +21,54 @@ import Navbar from '../components/layout/Navbar';
 import Sidebar from '../components/layout/Sidebar';
 import UserManager from '../components/dashboard/UserManager';
 import UserDetails from '../components/dashboard/UserDetails';
-import TicketManager from '../components/dashboard/TicketManager';
-import TicketDetailPage from './TicketDetailPage';
 import TicketModal from '../components/dashboard/TicketModal';
 import DashboardHome from '../components/dashboard/DashboardHome';
 import CockpitManager from '../components/cockpit/CockpitManager';
 import Logs from './Logs';
 import GlobalSearchPage from '../components/layout/GlobalSearchPage';
 
-
 // ================= TYPES =================
 type DashboardView = 'home' | 'profile' | 'users' | 'user-detail' | 'tickets' | 'ticket-detail' | 'cockpit' | 'logs' | 'search';
 
 // ================= COMPONENT =================
 export default function Dashboard() {
-  // ✅ HOOKS
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation(); // Ajout pour suivre l'URL
   const [searchParams, setSearchParams] = useSearchParams();
   const { isOpen, onOpen, onClose } = useDisclosure();
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // État pour l'ID utilisateur sélectionné (conservation au rafraîchissement)
-  const [selectedUserId, setSelectedUserId] = useState<string | number | null>(() => {
-    return localStorage.getItem('selected_user_id');
-  });
+  // État pour les IDs sélectionnés (hors tickets qui utilisent désormais useParams)
+  const [selectedUserId, setSelectedUserId] = useState<string | number | null>(() => localStorage.getItem('selected_user_id'));
 
-  // État pour l'ID du ticket sélectionné
-  const [selectedTicketId, setSelectedTicketId] = useState<string | number | null>(null);
+  // État pour la vue actuelle
+  const [view, setViewState] = useState<DashboardView>(() => (localStorage.getItem('dashboard_view') as DashboardView) || 'home');
 
-  // État pour la vue actuelle (conservation au rafraîchissement)
-  const [view, setViewState] = useState<DashboardView>(() =>
-    (localStorage.getItem('dashboard_view') as DashboardView) || 'home'
-  );
   const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
   const [ticketRefreshTrigger, setTicketRefreshTrigger] = useState(0);
   const q = searchParams.get('q') || '';
+  const isTicketRoute = location.pathname.includes('/tickets');
 
+  // Synchronisation search
   useEffect(() => {
-    if (q && view !== 'search') {
-      setView('search');
-    } else if (!q && view === 'search') {
-      setView('home');
-    }
+    if (q && view !== 'search') setView('search');
+    else if (!q && view === 'search') setView('home');
   }, [q, view]);
-  const handleDuplicateSuccess = (
-    duplicatedTicketId: string | number
-) => {
-    setView('ticket-detail', duplicatedTicketId);
-};
-  // ================= LOGOUT CLEAN =================
+
+  // Synchronisation de la Sidebar avec React Router (Pour garder le bouton "Tickets" en surbrillance)
+  useEffect(() => {
+    if (location.pathname.includes('/dashboard/tickets')) {
+      setViewState('tickets');
+    }
+  }, [location.pathname]);
+
+  // ================= LOGOUT =================
   const handleLogout = async () => {
-    try {
-      await apiLogout();
-    } catch {
-      // ignore
-    } finally {
+    try { await apiLogout(); } catch { /* ignore */ }
+    finally {
       logout();
       localStorage.removeItem('dashboard_view');
       localStorage.removeItem('selected_user_id');
@@ -87,12 +76,29 @@ export default function Dashboard() {
     }
   };
 
-  // ================= NAVIGATION =================
+  // ================= NAVIGATION UNIFORMISÉE =================
   const setView = (newView: DashboardView, id: string | number | null = null) => {
+    // Navigation gérée par React Router
+    if (newView === 'tickets') {
+      navigate('/dashboard/tickets');
+      onClose();
+      return;
+    }
+    if (newView === 'ticket-detail' && id) {
+      navigate(`/dashboard/tickets/${id}`);
+      onClose();
+      return;
+    }
+
+    // NOUVEAU : Si on clique sur une autre page, on doit "vider" l'URL des tickets
+    if (location.pathname !== '/dashboard') {
+      navigate('/dashboard');
+    }
+
+    // Gestion à l'ancienne (Pour les autres pages non migrées)
     setViewState(newView);
     localStorage.setItem('dashboard_view', newView);
 
-    // Gestion spécifique pour le détail utilisateur
     if (newView === 'user-detail' && id) {
       setSelectedUserId(id);
       localStorage.setItem('selected_user_id', id.toString());
@@ -101,194 +107,99 @@ export default function Dashboard() {
       localStorage.removeItem('selected_user_id');
     }
 
-    // Gestion spécifique pour le détail de ticket
-    if (newView === 'ticket-detail' && id) {
-      setSelectedTicketId(id);
-    } else if (newView !== 'ticket-detail') {
-      setSelectedTicketId(null);
-    }
-
-    onClose(); // Ferme le drawer mobile si ouvert
-  };
-
-  const openCreateTicketModal = () => {
-    setIsTicketModalOpen(true);
-  };
-
-  const goToTicketsView = () => {
-    setView('tickets');
-  };
-
-  const goToLogsView = () => {
-    setView('logs');
-  };
-
-  const goToSearchView = (search: string) => {
-    if (search.trim()) {
-      setSearchParams({ q: search.trim() });
-      setView('search');
-    }
+    onClose();
   };
 
   const handleTicketSuccess = (createdId?: string | number) => {
     setIsTicketModalOpen(false);
     setTicketRefreshTrigger((prev) => prev + 1);
 
-    // Si l'API a renvoyé l'ID du ticket créé, naviguer vers la vue détail
+    // Redirection propre via React Router après création
     if (createdId) {
-      setView('ticket-detail', createdId);
+      navigate(`/dashboard/tickets/${createdId}`);
+    } else {
+      navigate('/dashboard/tickets');
     }
   };
 
-  // ================= FETCH AUTHENTICATED USER =================
+  // ================= FETCH USER =================
   useEffect(() => {
     const fetchUser = async () => {
       try {
         const res = await api.get('/api/v1/customers/users/me/');
-        // On s'adapte à la structure de réponse (data wrapper ou direct)
-        const userData = res.data.data || res.data;
-        setUser(userData);
+        setUser(res.data.data || res.data);
       } catch (err) {
-        console.error('❌ User fetch error:', err);
         navigate('/');
       } finally {
         setLoading(false);
       }
     };
-
     fetchUser();
   }, [navigate]);
 
-  // ================= LOADING STATE =================
-  if (loading) {
-    return (
-      <Center h="100vh" bg="gray.50">
-        <Spinner size="xl" color="purple.500" thickness="4px" />
-      </Center>
-    );
-  }
+  if (loading) return <Center h="100vh" bg="gray.50"><Spinner size="xl" color="purple.500" /></Center>;
 
-  // ================= UI RENDERING =================
   return (
     <Flex direction="column" h="100vh" bg="gray.50">
-      {/* NAVBAR : Identité utilisateur et actions rapides */}
       <Navbar
         user={user}
         onProfileClick={() => setView('profile')}
         onOpenSidebar={onOpen}
         onLogout={handleLogout}
-        onSearch={goToSearchView}
-        onCreateTicket={openCreateTicketModal}
-        onViewTickets={goToTicketsView}
-        onViewLogs={goToLogsView}
+        onSearch={(s) => { if (s.trim()) { setSearchParams({ q: s.trim() }); setView('search'); } }}
+        onCreateTicket={() => setIsTicketModalOpen(true)}
+        onViewTickets={() => navigate('/dashboard/tickets')} // Forcé sur navigate
+        onViewLogs={() => setView('logs')}
         showCreateTicketButton={true}
         showViewTicketsButton={true}
         showLogsButton={true}
       />
 
       <Flex flex="1" overflow="hidden">
-        {/* SIDEBAR DESKTOP : Navigation latérale fixe */}
-        <Box
-          display={{ base: 'none', md: 'block' }}
-          w="260px"
-          bg="white"
-          borderRight="1px solid"
-          borderColor="gray.100"
-        >
+        <Box display={{ base: 'none', md: 'block' }} w="260px" bg="white" borderRight="1px solid" borderColor="gray.100">
           <Sidebar user={user} view={view} onViewChange={setView} />
         </Box>
 
-        {/* SIDEBAR MOBILE : Menu escamotable */}
         <Drawer isOpen={isOpen} placement="left" onClose={onClose}>
           <DrawerOverlay />
           <DrawerContent>
             <DrawerCloseButton />
-            <DrawerBody p={0}>
-              <Sidebar
-                user={user}
-                view={view}
-                onViewChange={(v: DashboardView) => {
-                  setView(v);
-                  onClose();
-                }}
-              />
-            </DrawerBody>
+            <DrawerBody p={0}><Sidebar user={user} view={view} onViewChange={(v) => { setView(v); onClose(); }} /></DrawerBody>
           </DrawerContent>
         </Drawer>
 
-        {/* MAIN CONTENT AREA */}
         <Box flex="1" overflowY="auto" p={{ base: 4, md: 8 }}>
-          {/* Remplacez toute votre logique de rendu conditionnel (if view === ...) par ceci : */}
 
+          {/* L'Outlet s'occupe UNIQUEMENT des tickets grâce à l'URL */}
+          <Outlet />
 
+          {/* On désactive TOUT le reste si on est sur la page d'un ticket */}
+          {!isTicketRoute && (
+            <>
+              {view === 'home' && <DashboardHome user={user} />}
 
-          {/* HOME */}
-          {view === 'home' && (
+              {view === 'users' && <UserManager onUserClick={(id) => setView('user-detail', id)} />}
 
-            <DashboardHome
-              user={user}
-            />
+              {view === 'user-detail' && selectedUserId && (
+                <UserDetails userId={selectedUserId} onBack={() => setView('users')} />
+              )}
 
+              {view === 'profile' && <UserDetails onBack={() => setView('home')} />}
+
+              {view === 'cockpit' && <CockpitManager />}
+
+              {view === 'search' && <GlobalSearchPage query={q} />}
+
+              {view === 'logs' && <Logs onBack={() => setView('home')} />}
+            </>
           )}
-
-          {/* VUE : GESTION DES TICKETS (CRUD) */}
-          {view === 'tickets' && (
-            <TicketManager
-              ticketRefreshTrigger={ticketRefreshTrigger}
-              onTicketClick={(id) => setView('ticket-detail', id)}
-            />
-          )}
-
-          {/* VUE : DÉTAILS D'UN TICKET */}
-          {view === 'ticket-detail' && selectedTicketId && (
-            <TicketDetailPage
-              ticketId={selectedTicketId}
-              onBack={() => setView('tickets')}
-              onDuplicateSuccess={handleDuplicateSuccess}
-
-            />
-          )}
-
-          {/* VUE : GESTION DES UTILISATEURS */}
-          {view === 'users' && (
-            <UserManager onUserClick={(id) => setView('user-detail', id)} />
-          )}
-
-          {/* VUE : DÉTAILS D'UN UTILISATEUR */}
-          {view === 'user-detail' && (
-            <UserDetails
-              userId={selectedUserId}
-              onBack={() => setView('users')}
-            />
-          )}
-
-          {/* VUE : PROFIL PERSONNEL (Réutilise UserDetails sans ID pour le "Me") */}
-          {view === 'profile' && <UserDetails onBack={() => setView('home')} />}
-
-          {/* VUE : COCKPIT (Équipements & Interventions) */}
-          {view === 'cockpit' && (
-            <CockpitManager />
-          )}
-
-          {/* VUE : SEARCH GLOBALE */}
-          {view === 'search' && (
-            <GlobalSearchPage query={q} />
-          )}
-
-          {/* VUE : LOGS (tickets draft) */}
-          {view === 'logs' && (
-            <Logs onBack={() => setView('home')} />
-          )}
-
-
         </Box>
       </Flex>
 
-      <TicketModal
-        isOpen={isTicketModalOpen}
-        onClose={() => setIsTicketModalOpen(false)}
-        onSuccess={handleTicketSuccess}
-      />
+      {/* J'ai conservé le trigger au cas où TicketManager est monté via l'Outlet et a besoin de ce refresh. 
+          Idéalement, avec React Query on ferait un `queryClient.invalidateQueries()`, 
+          mais cela permet de ne pas casser votre code actuel. */}
+      <TicketModal isOpen={isTicketModalOpen} onClose={() => setIsTicketModalOpen(false)} onSuccess={handleTicketSuccess} />
     </Flex>
   );
 }
