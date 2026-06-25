@@ -2,105 +2,209 @@ import { useEffect, useState } from 'react';
 import {
     Modal, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalBody,
     ModalCloseButton, Button, FormControl, FormLabel, Input, Switch,
-    VStack, Box, useToast, HStack, Heading
+    VStack, Box, useToast, Select, RadioGroup, Radio, Stack, Text
 } from '@chakra-ui/react';
 import api from '../../../api/apiClient';
 
+// Imports stricts depuis vos constantes globales
+import type { BuilderField, ConditionGroup } from './constants';
+
+// --- COMPOSANT AUTONOME : ÉDITEUR SIMPLIFIÉ DE CHECKPOINT POUR SECTIONS ---
+
+interface SectionConditionEditorProps {
+    visibilityType: 'always' | 'checkpoint';
+    setVisibilityType: (type: 'always' | 'checkpoint') => void;
+    selectedCheckpointId: number | string | null;
+    setSelectedCheckpointId: (id: number | string | null) => void;
+    availableFields: BuilderField[];
+}
+
+const SectionConditionEditor = ({
+    visibilityType,
+    setVisibilityType,
+    selectedCheckpointId,
+    setSelectedCheckpointId,
+    availableFields
+}: SectionConditionEditorProps) => {
+
+    // Filtrage strict : on ne conserve que les champs de type "checkpoint"
+    const checkpointFields = (availableFields || []).filter(
+        field => field.field_type === 'checkpoint' || (field as any).type === 'checkpoint'
+        
+    );
+
+    return (
+        <Box border="1px solid" borderColor="gray.200" p={4} borderRadius="md" bg="gray.50/50">
+            <FormControl>
+                <FormLabel fontWeight="bold" color="gray.700" mb={3}>
+                    Condition de visibilité
+                </FormLabel>
+
+                <RadioGroup
+                    onChange={(val) => {
+                        setVisibilityType(val as 'always' | 'checkpoint');
+                        if (val === 'always') setSelectedCheckpointId(null);
+                    }}
+                    value={visibilityType}
+                    colorScheme="purple"
+                >
+                    <Stack spacing={3}>
+                        <Radio value="always">
+                            <Text fontSize="sm">Toujours visible</Text>
+                        </Radio>
+
+                        <Radio value="checkpoint">
+                            <Text fontSize="sm">Visible uniquement lorsque le checkpoint suivant est validé</Text>
+                        </Radio>
+                    </Stack>
+                </RadioGroup>
+            </FormControl>
+
+            {visibilityType === 'checkpoint' && (
+                <FormControl isRequired mt={4} borderTop="1px dashed" borderColor="gray.200" pt={3}>
+                    <FormLabel fontSize="sm" fontWeight="semibold" color="gray.600">
+                        Checkpoint :
+                    </FormLabel>
+                    <Select
+                        bg="white"
+                        placeholder="Sélectionner un checkpoint"
+                        value={selectedCheckpointId || ''}
+                        onChange={(e) => setSelectedCheckpointId(e.target.value || null)}
+                    >
+                        {checkpointFields.length === 0 ? (
+                            <option disabled>Aucun checkpoint disponible dans ce formulaire</option>
+                        ) : (
+                            checkpointFields.map(field => (
+                                <option key={field.id} value={field.id}>
+                                    {field.label || field.code}
+                                </option>
+                            ))
+                        )}
+                    </Select>
+                </FormControl>
+            )}
+        </Box>
+    );
+};
+
+
+// --- COMPOSANT PRINCIPAL : SECTION MODAL ---
+
+export interface SectionData {
+    id?: number | string;
+    title?: string;
+    code?: string;
+    description?: string;
+    is_active?: boolean;
+    visibility_condition_group?: number | null;
+    visibility_condition_group_detail?: ConditionGroup | null;
+}
+
+export interface SectionModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    formVersionId: number | string;
+    fieldData?: SectionData | null;
+    availableFields: BuilderField[];
+    onSuccess: () => void;
+}
+
 export const SectionModal = ({
-    isOpen, onClose, interventionTypeId, formVersionId, fieldData, onSuccess
-}: any) => {
+    isOpen,
+    onClose,
+    formVersionId,
+    fieldData,
+    availableFields,
+    onSuccess
+}: SectionModalProps) => {
     const toast = useToast();
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState<boolean>(false);
 
     // 📦 Section States
-    const [title, setTitle] = useState('');
-    const [code, setCode] = useState('');
-    const [description, setDescription] = useState('');
-    const [isActive, setIsActive] = useState(true);
+    const [title, setTitle] = useState<string>('');
+    const [code, setCode] = useState<string>('');
+    const [description, setDescription] = useState<string>('');
+    const [isActive, setIsActive] = useState<boolean>(true);
 
-    // 🧠 Condition States (Liés au ConditionGroup)
-    const [hasSectionCondition, setHasSectionCondition] = useState(false);
-    const [targetField, setTargetField] = useState(''); // ex: brasseries_checked
-    const [expectedValue, setExpectedValue] = useState('true'); // default: true
-    const [existingGroupId, setExistingGroupId] = useState<number | null>(null);
+    // 🧠 Condition States (Spécifiques au métier simplifié des sections)
+    const [visibilityType, setVisibilityType] = useState<'always' | 'checkpoint'>('always');
+    const [selectedCheckpointId, setSelectedCheckpointId] = useState<number | string | null>(null);
 
-    // Initialisation des données (Mode Édition / Création)
+    // Initialisation & Remplissage en mode Édition
     useEffect(() => {
         if (!isOpen) return;
+
         if (fieldData) {
             setTitle(fieldData.title || '');
             setCode(fieldData.code || '');
             setDescription(fieldData.description || '');
             setIsActive(fieldData.is_active !== false);
 
-            // Si la section a déjà un groupe de condition lié
-            if (fieldData.visibility_condition_group_detail) {
-                setHasSectionCondition(true);
-                setExistingGroupId(fieldData.visibility_condition_group_detail.id);
-                setTargetField(fieldData.visibility_condition_group_detail.target_field || '');
-                setExpectedValue(fieldData.visibility_condition_group_detail.expected_value || 'true');
-            } else if (fieldData.visibility_condition_group) {
-                // Fallback si seul l'ID est fourni au début
-                setHasSectionCondition(true);
-                setExistingGroupId(fieldData.visibility_condition_group);
-                // Il faudra idéalement fetcher le groupe ou l'avoir dans le serializer d'édition
+            const groupDetail = fieldData.visibility_condition_group_detail;
+
+            // Extraction de la condition unique si elle existe
+            if (groupDetail && groupDetail.conditions && groupDetail.conditions.length > 0) {
+                const firstCondition = groupDetail.conditions[0];
+                setVisibilityType('checkpoint');
+                setSelectedCheckpointId(firstCondition.field_definition || null);
             } else {
-                resetConditionFields();
+                resetConditionState();
             }
         } else {
             setTitle('');
             setCode('');
             setDescription('');
             setIsActive(true);
-            resetConditionFields();
+            resetConditionState();
         }
     }, [isOpen, fieldData]);
 
-    const resetConditionFields = () => {
-        setHasSectionCondition(false);
-        setTargetField('');
-        setExpectedValue('true');
-        setExistingGroupId(null);
+    const resetConditionState = () => {
+        setVisibilityType('always');
+        setSelectedCheckpointId(null);
     };
 
     const handleSubmit = async () => {
         setLoading(true);
         try {
-            let conditionGroupId = existingGroupId;
+            // Résolution dynamique de l'ID du groupe existant (évite un state Redux ou local supplémentaire)
+            let conditionGroupId: number | null = fieldData?.visibility_condition_group_detail?.id ||
+                (typeof fieldData?.visibility_condition_group === 'number' ? fieldData.visibility_condition_group : null);
 
-            // 🚀 1. GESTION DU CONDITION GROUP (CREATION OU MISE A JOUR)
-            if (hasSectionCondition) {
+            // 1. Branchement Conditionnelle : Reconstruction transparente du schéma d'API
+            if (visibilityType === 'checkpoint' && selectedCheckpointId) {
                 const groupPayload = {
-                    name: `Condition Visibilité - ${title || code}`,
-                    form_version: formVersionId,
                     trigger: 'visibility',
-                    target_field: targetField,
-                    expected_value: expectedValue
+                    operator: 'AND', // Fixé par défaut à l'implémentation
+                    form_version: formVersionId,
+                    conditions: [
+                        {
+                            field_definition: Number(selectedCheckpointId),
+                            operator: 'eq', // Toujours "égal à" pour la validation de checkpoint
+                            value: true     // Validé implique 'true'
+                        }
+                    ]
                 };
 
                 if (conditionGroupId) {
-                    // Si le groupe existe déjà, on le met à jour
                     await api.put(`/api/v1/condition-groups/${conditionGroupId}/`, groupPayload);
                 } else {
-                    // Sinon, on crée le "champ magique" en premier
                     const groupRes = await api.post('/api/v1/condition-groups/', groupPayload);
                     conditionGroupId = groupRes.data.id;
                 }
-            } else if (conditionGroupId) {
-                // Si l'utilisateur a décoché la condition alors qu'il y en avait une avant,
-                // on optionnalise la suppression ou on détache simplement (ici on va juste détacher).
+            } else {
+                // Si "Toujours visible", on détache complètement le groupe
                 conditionGroupId = null;
             }
 
-            // 📦 2. SOUUMISSION DE LA SECTION
+            // 2. Payload final de sauvegarde de la Section
             const sectionPayload = {
                 title,
                 code,
                 description,
                 is_active: isActive,
-                intervention_type: interventionTypeId,
                 form_version: formVersionId,
-                visibility_condition_group: conditionGroupId // ID du groupe créé/existant
+                visibility_condition_group: conditionGroupId
             };
 
             if (fieldData?.id) {
@@ -116,11 +220,13 @@ export const SectionModal = ({
             });
             onSuccess();
             onClose();
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error(e);
+            const errorMessage = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+                || "Une erreur est survenue lors de l'enregistrement";
             toast({
                 title: 'Erreur',
-                description: e.response?.data?.detail || "Une erreur est survenue lors de l'enregistrement",
+                description: errorMessage,
                 status: 'error'
             });
         } finally {
@@ -136,13 +242,18 @@ export const SectionModal = ({
                 <ModalCloseButton />
                 <ModalBody>
                     <VStack spacing={4} align="stretch">
-                        {/* Information de la section */}
                         <FormControl isRequired>
                             <FormLabel>Titre de la section</FormLabel>
                             <Input value={title} onChange={(e) => {
-                                setTitle(e.target.value);
+                                const newTitle = e.target.value;
+                                setTitle(newTitle);
                                 if (!fieldData) {
-                                    setCode(e.target.value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''));
+                                    setCode(newTitle.toLowerCase()
+                                        .normalize("NFD")
+                                        .replace(/[\u0300-\u036f]/g, "")
+                                        .trim()
+                                        .replace(/\s+/g, '_')
+                                        .replace(/[^a-z0-9_]/g, ''));
                                 }
                             }} placeholder="Ex: Spécifications Techniques" />
                         </FormControl>
@@ -162,43 +273,15 @@ export const SectionModal = ({
                             <Switch isChecked={isActive} onChange={(e) => setIsActive(e.target.checked)} colorScheme="purple" />
                         </FormControl>
 
-                        {/* --- BLOC CONDITION DU CHECKPOINT --- */}
-                        <Box border="1px solid" borderColor="purple.200" p={4} borderRadius="md" bg="purple.50/30">
-                            <FormControl display="flex" justifyContent="space-between" alignItems="center">
-                                <FormLabel mb={0} fontWeight="semibold" color="purple.700">
-                                    Condition de visibilité (Checkpoint)
-                                </FormLabel>
-                                <Switch isChecked={hasSectionCondition} onChange={(e) => setHasSectionCondition(e.target.checked)} colorScheme="purple" />
-                            </FormControl>
+                        {/* Intégration directe du nouvel éditeur métier ultra-simplifié */}
+                        <SectionConditionEditor
+                            visibilityType={visibilityType}
+                            setVisibilityType={setVisibilityType}
+                            selectedCheckpointId={selectedCheckpointId}
+                            setSelectedCheckpointId={setSelectedCheckpointId}
+                            availableFields={availableFields}
+                        />
 
-                            {hasSectionCondition && (
-                                <VStack spacing={3} mt={4} align="stretch" borderTop="1px dashed" borderColor="purple.200" pt={3}>
-                                    <Heading size="xs" color="gray.600">Configuration du déclencheur</Heading>
-
-                                    <HStack spacing={4}>
-                                        <FormControl isRequired>
-                                            <FormLabel fontSize="sm">Code du champ cible (Target Field)</FormLabel>
-                                            <Input
-                                                bg="white"
-                                                value={targetField}
-                                                onChange={(e) => setTargetField(e.target.value)}
-                                                placeholder="Ex: brasseries_checked"
-                                            />
-                                        </FormControl>
-
-                                        <FormControl isRequired>
-                                            <FormLabel fontSize="sm">Valeur attendue (Expected Value)</FormLabel>
-                                            <Input
-                                                bg="white"
-                                                value={expectedValue}
-                                                onChange={(e) => setExpectedValue(e.target.value)}
-                                                placeholder="Ex: true, oui, 1"
-                                            />
-                                        </FormControl>
-                                    </HStack>
-                                </VStack>
-                            )}
-                        </Box>
                     </VStack>
                 </ModalBody>
                 <ModalFooter borderTop="1px solid" borderColor="gray.100">

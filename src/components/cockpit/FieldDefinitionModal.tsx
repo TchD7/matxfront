@@ -1,6 +1,8 @@
 import { SectionModal } from './fieldDefinition/SectionModal';
 import { FieldModal } from './fieldDefinition/FieldModal';
 
+import type { BuilderField } from './fieldDefinition/constants';
+
 interface FieldDefinitionModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -9,17 +11,32 @@ interface FieldDefinitionModalProps {
     interventionTypeId: string | number;
     formVersionId: string | number | null;
     fieldData: any;
+    availableFields?: BuilderField[];
     onSuccess: () => void;
 }
 
-export const FieldDefinitionModal = ({ mode, ...props }: FieldDefinitionModalProps) => {
-    if (mode === 'section') {
-        return <SectionModal {...props} />;
-    }
+export const FieldDefinitionModal = ({
+    mode,
+    availableFields = [],
+    ...props
+}: FieldDefinitionModalProps) => {
+    switch (mode) {
+        case 'section':
+            return (
+                <SectionModal
+                    {...props}
+                />
+            );
 
-    if (mode === 'field') {
-        return <FieldModal {...props} />;
-    }
+        case 'field':
+            return (
+                <FieldModal
+                    {...props}
+                    availableFields={availableFields}
+                />
+            );
 
-    return null;
+        default:
+            return null;
+    }
 };

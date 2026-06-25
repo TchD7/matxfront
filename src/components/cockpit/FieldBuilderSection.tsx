@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     SimpleGrid, Box, VStack, Heading, Flex, Text, Button, HStack,
-    useDisclosure, useToast, Icon
+    useDisclosure, useToast, Icon, AlertDialog, AlertDialogBody, AlertDialogFooter, AlertDialogHeader,
+    AlertDialogContent, AlertDialogOverlay
 } from '@chakra-ui/react';
 import { FiPlus, FiLayers, FiFileText } from 'react-icons/fi';
 
@@ -90,31 +91,125 @@ export default function FieldBuilderSection() {
         }
     };
 
-    const handleMoveFieldLocal = (sectionId: any, index: number, direction: 'up' | 'down') => {
-        setSections(prev => prev.map(sec => {
-            if (sec.id !== sectionId) return sec;
-            const updated = [...sec.fields];
-            const target = direction === 'up' ? index - 1 : index + 1;
-            if (target < 0 || target >= updated.length) return sec;
-            [updated[index], updated[target]] = [updated[target], updated[index]];
-            return { ...sec, fields: updated };
-        }));
-    };
+    const handleMoveFieldLocal = (
+        sectionId: string | number,
+        fieldId: string | number,
+        direction: 'up' | 'down'
+    ) => {
+        setSections(prev =>
+            prev.map(sec => {
+                if (sec.id !== sectionId) return sec;
 
+                const updated = [...sec.fields];
+
+                const index = updated.findIndex(
+                    (f: any) => String(f.id) === String(fieldId)
+                );
+
+                if (index === -1) return sec;
+
+                const target =
+                    direction === 'up'
+                        ? index - 1
+                        : index + 1;
+
+                if (target < 0 || target >= updated.length) {
+                    return sec;
+                }
+
+                [updated[index], updated[target]] =
+                    [updated[target], updated[index]];
+
+                return {
+                    ...sec,
+                    fields: updated
+                };
+            })
+        );
+    };
+    // =====================
+    // ÉTATS POUR LA CONFIRMATION DE SUPPRESSION
+    // =====================
+    const {
+        isOpen: isDeleteOpen,
+        onOpen: onDeleteOpen,
+        onClose: onDeleteClose
+    } = useDisclosure();
+
+    const [deleteTarget, setDeleteTarget] = useState<{ id: any; type: 'section' | 'field' } | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const cancelRef = useRef<any>(null);
+
+    // =====================
+    // DECLENCHEURS (Ouvrent le modal au lieu de supprimer directement)
+    // =====================
     const handleDeleteSection = async (sectionId: any) => {
-        await api.delete(`/api/v1/sections/${sectionId}/`);
-        refreshData();
-    };
-
-    const handleDeploySection = async (sectionId: any) => {
-        await api.post('/api/v1/sections/deploy/', { section_id: sectionId });
-        refreshData();
+        setDeleteTarget({ id: sectionId, type: 'section' });
+        onDeleteOpen();
     };
 
     const handleDeleteFieldLocal = async (fieldId: any) => {
-        await api.delete(`/api/v1/field-definitions/${fieldId}/`);
+        setDeleteTarget({ id: fieldId, type: 'field' });
+        onDeleteOpen();
+    };
+
+    // =====================
+    // EXÉCUTION DE LA SUPPRESSION (Appelé quand on clique sur "Confirmer")
+    // =====================
+    const handleConfirmDelete = async () => {
+        if (!deleteTarget) return;
+        setIsDeleting(true);
+
+        try {
+            if (deleteTarget.type === 'section') {
+                await api.delete(`/api/v1/sections/${deleteTarget.id}/`);
+                toast({ title: "Section supprimée", status: "success", duration: 2000 });
+            } else {
+                await api.delete(`/api/v1/field-definitions/${deleteTarget.id}/`);
+                toast({ title: "Champ supprimé", status: "success", duration: 2000 });
+            }
+            refreshData();
+            onDeleteClose(); // Ferme le modal après succès
+        } catch (err: any) {
+            console.error("Erreur lors de la suppression:", err);
+            toast({
+                title: "Erreur lors de la suppression",
+                description: err.response?.data?.detail || "Une erreur est survenue",
+                status: "error"
+            });
+        } finally {
+            setIsDeleting(false);
+            setDeleteTarget(null);
+        }
+    };
+
+
+    const handleDeploySection = async (sectionId: any) => {
+
+        const section = sections.find(
+            s => String(s.id) === String(sectionId)
+        );
+
+        if (!section) {
+            toast({
+                title: "Section introuvable",
+                status: "error"
+            });
+            return;
+        }
+
+        await api.post('/api/v1/sections/deploy/', {
+            section_id: section.id,
+            title: section.title,
+            code: section.code,
+            description: section.description,
+            visibility_condition_group: section.visibility_condition_group,
+            fields: section.fields
+        });
+
         refreshData();
     };
+
 
     // =====================
     // MODALS
@@ -135,8 +230,11 @@ export default function FieldBuilderSection() {
         setActiveSectionId(section ? section.id : null);
         onOpen();
     };
-
+    const allFields = sections.flatMap(
+        section => Array.isArray(section.fields) ? section.fields : []
+    );
     return (
+
         <SimpleGrid columns={{ base: 1, md: 4 }} gap={6} alignItems="start">
             <Box bg="white" p={4} borderRadius="xl" border="1px solid #E2E8F0">
                 <Heading size="xs" mb={4} color="gray.500">
@@ -169,7 +267,7 @@ export default function FieldBuilderSection() {
                 {/* 🎯 AJOUT DE LA PROP ICI */}
                 <SectionAccordion
                     sections={sections}
-                    openSectionModal={openSectionModal} // 👈 Relié au handler parent modifié
+                    openSectionModal={openSectionModal}
                     openFieldModal={openFieldModal}
                     handleUpdateFieldLocal={handleUpdateFieldLocal}
                     handleMoveFieldLocal={handleMoveFieldLocal}
@@ -184,11 +282,49 @@ export default function FieldBuilderSection() {
                 onClose={onClose}
                 mode={modalMode}
                 sectionId={activeSectionId}
-                fieldData={editingField} // Recevra soit le champ, soit la section complète
                 interventionTypeId={selectedTypeId}
                 formVersionId={formVersionId}
+                fieldData={editingField}
+                availableFields={allFields}
                 onSuccess={refreshData}
             />
+
+            {/* 👇 AJOUTE CE BLOC ICI 👇 */}
+            <AlertDialog
+                isOpen={isDeleteOpen}
+                leastDestructiveRef={cancelRef}
+                onClose={onDeleteClose}
+                isCentered
+            >
+                <AlertDialogOverlay>
+                    <AlertDialogContent borderRadius="xl">
+                        <AlertDialogHeader fontSize="lg" fontWeight="bold">
+                            Confirmer la suppression
+                        </AlertDialogHeader>
+
+                        <AlertDialogBody>
+                            Êtes-vous sûr de vouloir supprimer ce{deleteTarget?.type === 'section' ? 'me section' : ' champ'} ?
+                            Cette action est irréversible.
+                        </AlertDialogBody>
+
+                        <AlertDialogFooter>
+                            <Button ref={cancelRef} onClick={onDeleteClose} variant="ghost" size="sm">
+                                Annuler
+                            </Button>
+                            <Button
+                                colorScheme="red"
+                                onClick={handleConfirmDelete}
+                                isLoading={isDeleting}
+                                ml={3}
+                                size="sm"
+                            >
+                                Supprimer
+                            </Button>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialogOverlay>
+            </AlertDialog>
+
         </SimpleGrid>
     );
 }

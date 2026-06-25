@@ -1,38 +1,56 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     HStack, Text, Select, Button, Badge, useToast, Menu, MenuButton,
     MenuList, MenuItem, Icon
 } from '@chakra-ui/react';
-import { FiChevronDown, FiCheckCircle, FiCopy, FiLayers, FiTrash2 } from 'react-icons/fi';
+import { FiChevronDown, FiCheckCircle, FiCopy, FiLayers, FiTrash2, FiLock } from 'react-icons/fi';
 import api from '../../api/apiClient';
+
+// 👈 2. Création de l'interface stricte (zéro any)
+export interface FormVersion {
+    id: number | string;
+    label: string;
+    version: number;
+    is_published: boolean;
+    created_at?: string;
+}
 
 interface FormVersionSelectorProps {
     interventionTypeId: string | number;
     onVersionChange: (versionId: string | null) => void;
+    // 👈 8. Ajout de la prop pour notifier le parent du mode lecture seule
+    onVersionMetaChange?: (version: FormVersion | null) => void;
 }
 
 export default function FormVersionSelector({
     interventionTypeId,
     onVersionChange,
+    onVersionMetaChange,
 }: FormVersionSelectorProps) {
-    const [versions, setVersions] = useState<any[]>([]);
+    const [versions, setVersions] = useState<FormVersion[]>([]);
     const [selectedVersionId, setSelectedVersionId] = useState<string>('');
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState<boolean>(false);
     const toast = useToast();
 
-    // Fonction de chargement des versions (Stable)
+    // Référence pour lire l'état actuel sans l'ajouter aux dépendances
+    const selectedIdRef = useRef<string>(selectedVersionId);
+    useEffect(() => {
+        selectedIdRef.current = selectedVersionId;
+    }, [selectedVersionId]);
+
+    // 👈 1. loadVersions sécurisé (pas de dépendance circulaire, pas d'effets dans le setState)
     const loadVersions = useCallback(async () => {
         if (!interventionTypeId) return;
         try {
             const res = await api.get(`/api/v1/form-versions/?intervention_type=${interventionTypeId}`);
-            const data = res.data?.results || res.data || [];
+            const data: FormVersion[] = res.data?.results || res.data || [];
             setVersions(data);
 
-            // N'initialise que si rien n'est sélectionné ou si l'ID n'existe plus
-            const exists = data.some((v: any) => String(v.id) === String(selectedVersionId));
+            const prevId = selectedIdRef.current;
+            const exists = data.some((v: FormVersion) => String(v.id) === String(prevId));
 
             if (!exists) {
-                const active = data.find((v: any) => v.is_published) || data[0];
+                const active = data.find((v: FormVersion) => v.is_published) || data[0];
                 if (active) {
                     const activeId = String(active.id);
                     setSelectedVersionId(activeId);
@@ -42,39 +60,45 @@ export default function FormVersionSelector({
                     onVersionChange(null);
                 }
             }
-            // Si 'exists' est vrai, on ne fait rien, on garde la sélection actuelle
         } catch {
             toast({ title: "Erreur chargement versions", status: "error" });
         }
-    }, [interventionTypeId, onVersionChange, toast, selectedVersionId]); // Ajout de selectedVersionId ici
+    }, [interventionTypeId, onVersionChange, toast]);
 
     useEffect(() => {
         loadVersions();
     }, [loadVersions]);
 
-    const currentVersion = versions.find(v => String(v.id) === selectedVersionId);
+    const currentVersion = versions.find(v => String(v.id) === selectedVersionId) || null;
+
+    // 👈 8. Remonter les métadonnées de la version au parent à chaque changement
+    useEffect(() => {
+        if (onVersionMetaChange) {
+            onVersionMetaChange(currentVersion);
+        }
+    }, [currentVersion, onVersionMetaChange]);
 
     const handleSelectChange = (val: string) => {
         setSelectedVersionId(val);
         onVersionChange(val || null);
     };
+
     const handleCreateNew = async () => {
         setIsLoading(true);
         try {
-            // Appel API pour créer une nouvelle version vierge
             const res = await api.post(`/api/v1/form-versions/`, {
                 intervention_type: interventionTypeId
             });
 
             toast({ title: "Nouvelle version créée", status: "success" });
-            await loadVersions();
-
-            // Sélection automatique de la nouvelle version
+            
+            // On sélectionne d'abord, puis on recharge la liste
             if (res.data?.id) {
                 const newId = String(res.data.id);
                 setSelectedVersionId(newId);
                 onVersionChange(newId);
             }
+            await loadVersions();
         } catch {
             toast({ title: "Erreur création version", status: "error" });
         } finally {
@@ -82,45 +106,75 @@ export default function FormVersionSelector({
         }
     };
 
-    // Actions API avec rafraîchissement local
-    const handleAction = async (actionFn: () => Promise<any>, successMsg: string, errorMsg: string) => {
+    const handlePublish = async () => {
         setIsLoading(true);
         try {
-            await actionFn();
-            toast({ title: successMsg, status: "success" });
-            await loadVersions(); // Rafraîchissement propre après succès
+            await api.post(`/api/v1/form-versions/${selectedVersionId}/publish/`);
+            toast({ title: "Version publiée", status: "success" });
+            await loadVersions();
         } catch {
-            toast({ title: errorMsg, status: "error" });
+            toast({ title: "Erreur publication", status: "error" });
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handlePublish = () => handleAction(
-        () => api.post(`/api/v1/form-versions/${selectedVersionId}/publish/`),
-        "Version publiée", "Erreur publication"
-    );
+    // 👈 4. Corriger la duplication en sélectionnant le brouillon immédiatement
+    const handleDuplicate = async () => {
+        setIsLoading(true);
+        try {
+            const res = await api.post(`/api/v1/form-versions/${selectedVersionId}/duplicate/`);
+            toast({ title: "Brouillon créé", status: "success" });
+            
+            if (res.data?.id) {
+                const draftId = String(res.data.id);
+                setSelectedVersionId(draftId);
+                onVersionChange(draftId);
+            }
+            await loadVersions();
+        } catch {
+            toast({ title: "Erreur duplication", status: "error" });
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
-    const handleDuplicate = () => handleAction(
-        () => api.post(`/api/v1/form-versions/${selectedVersionId}/duplicate/`),
-        "Brouillon créé", "Erreur duplication"
-    );
-
+    // 👈 5. Corriger la suppression en pré-sélectionnant la prochaine version logique
     const handleDeleteDraft = async () => {
         if (!selectedVersionId || currentVersion?.is_published) return;
 
-        // Optimistic Update
         const previousVersions = [...versions];
-        setVersions(prev => prev.filter(v => String(v.id) !== selectedVersionId));
+        const nextVersions = versions.filter(v => String(v.id) !== selectedVersionId);
+        
+        // Optimistic UI : Mise à jour de la liste ET de la sélection immédiate
+        setVersions(nextVersions);
+        const active = nextVersions.find(v => v.is_published) || nextVersions[0];
+        
+        if (active) {
+            const activeId = String(active.id);
+            setSelectedVersionId(activeId);
+            onVersionChange(activeId);
+        } else {
+            setSelectedVersionId('');
+            onVersionChange(null);
+        }
 
         try {
             await api.delete(`/api/v1/form-versions/${selectedVersionId}/delete-draft/`);
             toast({ title: "Brouillon supprimé", status: "success" });
-            await loadVersions();
+            await loadVersions(); // Sécurise la synchro avec le backend
         } catch {
             setVersions(previousVersions);
+            setSelectedVersionId(selectedIdRef.current);
+            onVersionChange(selectedIdRef.current);
             toast({ title: "Erreur suppression", status: "error" });
         }
+    };
+
+    // Helper pour formater la date
+    const formatDate = (dateString?: string) => {
+        if (!dateString) return '';
+        return new Date(dateString).toLocaleDateString('fr-FR');
     };
 
     return (
@@ -132,26 +186,42 @@ export default function FormVersionSelector({
                 </Text>
             </HStack>
 
-
             <Select
                 size="sm"
-                w="400px"
+                w="450px" // Un peu plus large pour laisser la place aux dates
                 value={selectedVersionId}
                 onChange={(e) => handleSelectChange(e.target.value)}
             >
-                {/* Option par défaut si rien n'est sélectionné */}
                 <option value="">Sélectionner une version...</option>
 
-                {versions.map((v) => (
-                    <option key={v.id} value={v.id}>
-                        {v.label} {v.is_published ? '(Live)' : '(Brouillon)'}
-                    </option>
-                ))}
+                {versions.map((v) => {
+                    // 👈 6 & 7. Formatage riche du label (V{version} - {label} - Créée le {date})
+                    const dateStr = v.created_at ? ` - Créée le ${formatDate(v.created_at)}` : '';
+                    const statusStr = v.is_published ? '(Live)' : `(Brouillon${dateStr})`;
+                    
+                    return (
+                        <option key={v.id} value={String(v.id)}>
+                            V{v.version} - {v.label} {statusStr}
+                        </option>
+                    );
+                })}
             </Select>
 
             {currentVersion && (
-                <Badge colorScheme={currentVersion.is_published ? 'green' : 'orange'} px={2} py={1} borderRadius="md">
-                    {currentVersion.is_published ? 'En production' : 'Brouillon'}
+                <Badge 
+                    colorScheme={currentVersion.is_published ? 'green' : 'orange'} 
+                    px={2} py={1} 
+                    borderRadius="md"
+                    display="flex"
+                    alignItems="center"
+                    gap={1}
+                >
+                    {/* 👈 8. Affichage du cadenas pour une version publiée */}
+                    {currentVersion.is_published ? (
+                        <><FiLock size={12} /> 🔒 Version publiée</>
+                    ) : (
+                        'Brouillon'
+                    )}
                 </Badge>
             )}
 
@@ -160,23 +230,37 @@ export default function FormVersionSelector({
                     Actions
                 </MenuButton>
                 <MenuList>
-                    <MenuItem
-
-                        onClick={handleCreateNew}
-                    >
+                    <MenuItem onClick={handleCreateNew}>
                         Créer nouvelle version
                     </MenuItem>
 
-                    <MenuItem icon={<FiCopy />} onClick={handleDuplicate}>
+                    {/* 👈 3. On désactive si rien n'est sélectionné */}
+                    <MenuItem 
+                        icon={<FiCopy />} 
+                        onClick={handleDuplicate}
+                        isDisabled={!selectedVersionId}
+                    >
                         Dupliquer en brouillon
                     </MenuItem>
+
                     {currentVersion && !currentVersion.is_published && (
                         <>
-                            <MenuItem icon={<FiCheckCircle color="green" />} onClick={handlePublish}>Publier</MenuItem>
-                            <MenuItem icon={<FiTrash2 color="red" />} onClick={handleDeleteDraft}>Supprimer brouillon</MenuItem>
+                            <MenuItem 
+                                icon={<FiCheckCircle color="green" />} 
+                                onClick={handlePublish}
+                                isDisabled={!selectedVersionId}
+                            >
+                                Publier
+                            </MenuItem>
+                            <MenuItem 
+                                icon={<FiTrash2 color="red" />} 
+                                onClick={handleDeleteDraft}
+                                isDisabled={!selectedVersionId}
+                            >
+                                Supprimer brouillon
+                            </MenuItem>
                         </>
                     )}
-
                 </MenuList>
             </Menu>
         </HStack>

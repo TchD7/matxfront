@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api/apiClient';
-import type { RenderField, RenderSection, TicketFieldValueRecord } from '../types/formRender.types';
+import type { RenderField, RenderSection } from '../types/formRender.types';
 
 const DEFAULT_DEBOUNCE_MS = 700;
+
+// --- Interfaces correspondant au backend Django DRF ---
+interface TicketFieldValueApi {
+    id: number | string;
+    field_id: number | string; // Clé métier corrigée
+    ticket?: string | number;
+    code?: string;
+    label?: string;
+    field_type?: string;
+    value: any;
+}
+
+// --- Fonctions Utilitaires ---
 
 const normalizeTicketValue = (field: RenderField, rawValue: any) => {
     if (field.type === 'checkbox') {
@@ -26,6 +39,14 @@ const normalizeTicketValue = (field: RenderField, rawValue: any) => {
     return rawValue ?? '';
 };
 
+const formatValueForApi = (field: RenderField, value: any) => {
+    if (field.type === 'checkbox') return Boolean(value);
+    if (field.type === 'multi_select') {
+        return Array.isArray(value) ? value : String(value).split(',').map((item) => item.trim()).filter(Boolean);
+    }
+    return value;
+};
+
 const buildRenderSectionsFromResponse = (data: any): RenderSection[] => {
     if (!data) return [];
     if (Array.isArray(data)) return data;
@@ -46,15 +67,7 @@ const getDefaultValueForType = (field: RenderField) => {
     return '';
 };
 
-const formatValueForApi = (field: RenderField, value: any) => {
-    if (field.type === 'checkbox') {
-        return Boolean(value);
-    }
-    if (field.type === 'multi_select') {
-        return Array.isArray(value) ? value : String(value).split(',').map((item) => item.trim()).filter(Boolean);
-    }
-    return value;
-};
+// --- Hook Principal ---
 
 export function useRenderedTicketForm(
     ticketId: string | number | null,
@@ -68,7 +81,8 @@ export function useRenderedTicketForm(
     const [error, setError] = useState<string | null>(null);
     const [hasSavedValues, setHasSavedValues] = useState(false);
 
-    const saveTimeoutRef = useRef<number | null>(null);
+    // Remplacement du timeout global par un dictionnaire pour supporter les saisies simultanées
+    const debounceRefs = useRef<Record<string, number>>({});
 
     const loadRender = useCallback(async () => {
         if (!ticketId) return;
@@ -82,36 +96,38 @@ export function useRenderedTicketForm(
             ]);
 
             const renderData = buildRenderSectionsFromResponse(renderResponse.data);
-            const valuesData = valuesResponse.data.results || valuesResponse.data || [];
+            const valuesData: TicketFieldValueApi[] = valuesResponse.data.results || valuesResponse.data || [];
 
             const fieldMap = getFieldById(renderData);
-            const defaults: Record<string, any> = {};
+            const updatedValues: Record<string, any> = {};
+            const updatedRecordIds: Record<string, string | number> = {};
+
+            // Initialisation des valeurs par défaut depuis le rendu
             renderData.forEach((section) => {
                 section.fields?.forEach((field) => {
-                    defaults[String(field.id)] = getDefaultValueForType(field);
+                    updatedValues[String(field.id)] = getDefaultValueForType(field);
                 });
             });
 
-            const updatedValues = { ...defaults };
-            const updatedRecordIds: Record<string, string | number> = {};
-
-            valuesData.forEach((item: any) => {
-                const fieldDefId = item.field_definition?.id ?? item.field_definition ?? item.field_definition_id;
-                if (!fieldDefId) return;
-                const key = String(fieldDefId);
+            // Écrasement par les valeurs existantes en base (ciblage strict sur field_id)
+            valuesData.forEach((item) => {
+                if (!item.field_id) return;
+                
+                const key = String(item.field_id);
                 const field = fieldMap.get(key);
+                
                 updatedValues[key] = field ? normalizeTicketValue(field, item.value) : item.value;
-                updatedRecordIds[key] = item.id;
+                updatedRecordIds[key] = item.id; // Stockage de l'ID de la ligne pour les futurs PATCH
             });
 
             setSections(renderData);
             setValues(updatedValues);
             setRecordIds(updatedRecordIds);
             setHasSavedValues(valuesData.length > 0);
-        } catch (renderError: any) {
-            const title = renderError?.response?.status === 404 ? 'Point de rendu absent' : 'Erreur de rendu du ticket';
-            console.warn('[useRenderedTicketForm] ', title, renderError?.response?.data || renderError.message);
-            setError(renderError?.response?.data?.detail || renderError?.message || 'Impossible de charger le rendu backend.');
+        } catch (err: any) {
+            const title = err?.response?.status === 404 ? 'Point de rendu absent' : 'Erreur de rendu du ticket';
+            console.warn('[useRenderedTicketForm] ', title, err?.response?.data || err.message);
+            setError(err?.response?.data?.detail || err?.message || 'Impossible de charger le rendu .');
         } finally {
             setIsLoading(false);
         }
@@ -135,53 +151,61 @@ export function useRenderedTicketForm(
                 const fieldKey = String(fieldId);
                 const field = getFieldById(sections).get(fieldKey);
                 const payloadValue = field ? formatValueForApi(field, value) : value;
-
                 const existingRecordId = recordIds[fieldKey];
+
+                // Logique métier respectée : PATCH si existant, POST en dernier recours
                 if (existingRecordId) {
                     await api.patch(`/api/v1/ticket-field-values/${existingRecordId}/`, {
                         value: payloadValue,
                     });
                 } else {
-                    await api.post('/api/v1/ticket-field-values/', {
+                    const response = await api.post('/api/v1/ticket-field-values/', {
                         ticket: ticketId,
-                        field_definition: fieldId,
+                        field_definition: fieldId, // Selon l'API de création, si elle exige toujours field_definition au POST
                         value: payloadValue,
                     });
+                    
+                    // Mise à jour locale de l'ID en cas de création exceptionnelle pour forcer les prochains appels en PATCH
+                    if (response.data?.id) {
+                        setRecordIds((prev) => ({ ...prev, [fieldKey]: response.data.id }));
+                    }
                 }
-
-                await refresh();
                 return true;
-            } catch (saveError: any) {
-                setError(saveError?.response?.data?.detail || saveError?.message || 'Erreur de sauvegarde du champ.');
+            } catch (err: any) {
+                setError(err?.response?.data?.detail || err?.message || 'Erreur de sauvegarde du champ.');
                 return false;
             } finally {
                 setIsSaving(false);
             }
         },
-        [ticketId, recordIds, refresh, sections]
+        [ticketId, recordIds, sections]
     );
 
     const updateFieldValue = useCallback(
         (fieldId: string | number, value: any) => {
-            setValues((prev) => ({ ...prev, [String(fieldId)]: value }));
+            const fieldKey = String(fieldId);
+            setValues((prev) => ({ ...prev, [fieldKey]: value }));
 
             if (!ticketId) return;
-            if (saveTimeoutRef.current) {
-                window.clearTimeout(saveTimeoutRef.current);
+
+            // Debounce par champ spécifique pour ne pas bloquer les saisies multiples
+            if (debounceRefs.current[fieldKey]) {
+                window.clearTimeout(debounceRefs.current[fieldKey]);
             }
 
-            saveTimeoutRef.current = window.setTimeout(() => {
+            debounceRefs.current[fieldKey] = window.setTimeout(() => {
                 saveFieldValue(fieldId, value);
             }, DEFAULT_DEBOUNCE_MS);
         },
         [saveFieldValue, ticketId]
     );
 
+    // Nettoyage de tous les chronomètres au démontage du composant
     useEffect(() => {
         return () => {
-            if (saveTimeoutRef.current) {
-                window.clearTimeout(saveTimeoutRef.current);
-            }
+            Object.values(debounceRefs.current).forEach((timeoutId) => {
+                window.clearTimeout(timeoutId);
+            });
         };
     }, []);
 
@@ -211,8 +235,8 @@ export function useRenderedTicketForm(
             await Promise.all(savePromises);
             await refresh();
             return true;
-        } catch (saveAllError: any) {
-            setError(saveAllError?.response?.data?.detail || saveAllError?.message || 'Erreur lors de la sauvegarde des valeurs.');
+        } catch (err: any) {
+            setError(err?.response?.data?.detail || err?.message || 'Erreur lors de la sauvegarde des valeurs.');
             return false;
         } finally {
             setIsSaving(false);

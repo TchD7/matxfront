@@ -19,28 +19,28 @@ import {
     FiLock,
     FiUnlock
 } from 'react-icons/fi';
-
-import type { FieldDefinition } from './fieldDefinition/types';
+import type {
+    BuilderField,
+} from './fieldDefinition/constants';
 
 interface Props {
-    fields: FieldDefinition[];
-    sectionId: string | number;
-    isSectionDeployed?: boolean; // Reçu du parent (vrai si lié à une version publiée)
+    fields: BuilderField[];
+    isSectionDeployed?: boolean;
 
     onUpdateField: (
         fieldId: string | number,
-        key: keyof FieldDefinition,
+        key: keyof BuilderField,
         value: any
     ) => void;
 
     onDeleteField: (fieldId: string | number) => void;
 
     onMoveField: (
-        index: number,
+        fieldId: string | number,
         direction: 'up' | 'down'
     ) => void;
 
-    onEditField: (field: FieldDefinition) => void;
+    onEditField: (field: BuilderField) => void;
 }
 
 const FieldDefinitionListComponent = ({
@@ -63,7 +63,6 @@ const FieldDefinitionListComponent = ({
                 textAlign="center"
                 py={6}
             >
-
                 Aucun champ dans cette section
             </Text>
         );
@@ -75,7 +74,11 @@ const FieldDefinitionListComponent = ({
     return (
         <VStack spacing={3} align="stretch">
             {fields.map((field, index) => {
-                const isDependency = Boolean(field.depends_on_field_id);
+                const hasConditions =
+                    !!field.depends_on_field_id ||
+                    !!field.visibility_condition_group ||
+                    !!field.required_condition_group ||
+                    !!field.enabled_condition_group;
 
                 return (
                     <Box
@@ -137,7 +140,7 @@ const FieldDefinitionListComponent = ({
                                     size="xs"
                                     icon={<FiArrowUp />}
                                     isDisabled={index === 0}
-                                    onClick={() => onMoveField(index, 'up')}
+                                    onClick={() => onMoveField(field.id, 'up')}
                                 />
 
                                 <IconButton
@@ -145,7 +148,7 @@ const FieldDefinitionListComponent = ({
                                     size="xs"
                                     icon={<FiArrowDown />}
                                     isDisabled={index === fields.length - 1}
-                                    onClick={() => onMoveField(index, 'down')}
+                                    onClick={() => onMoveField(field.id, 'down')}
                                 />
 
                                 <IconButton
@@ -163,11 +166,8 @@ const FieldDefinitionListComponent = ({
                                     colorScheme="red"
                                     variant="ghost"
                                     icon={<FiTrash2 />}
-                                    onClick={() => {
-                                        if (confirm(`Supprimer le champ "${field.label || field.code}" ?`)) {
-                                            onDeleteField(field.id);
-                                        }
-                                    }}
+                                    onClick={() => onDeleteField(field.id)}
+
                                 />
                             </HStack>
                         </Flex>
@@ -176,47 +176,26 @@ const FieldDefinitionListComponent = ({
 
                         {/* BODY */}
                         <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
-                            <HStack spacing={2} wrap="wrap">
-                                <Badge variant="subtle" colorScheme="gray">
-                                    {field.field_type}
-                                </Badge>
-
-                                {field.required && (
-                                    <Badge colorScheme="red">
-                                        requis
-                                    </Badge>
-                                )}
-
-                                {field.unit && (
-                                    <Badge colorScheme="green">
-                                        {field.unit}
-                                    </Badge>
-                                )}
-
-                                {Array.isArray(field.options) && field.options.length > 0 && (
-                                    <Badge colorScheme="blue">
-                                        {field.options.length} options
-                                    </Badge>
-                                )}
-                            </HStack>
 
                             {/* REQUIRED TOGGLE */}
                             <HStack spacing={2}>
                                 <Text fontSize="xs" color="gray.500">Requis</Text>
                                 <Switch
-                                    aria-label="Marquer comme requis"
-                                    size="sm"
-                                    colorScheme={isSectionDeployed ? "green" : "purple"}
+                                    isDisabled={!!field.required_condition_group}
                                     isChecked={field.required}
                                     onChange={(e) =>
-                                        onUpdateField(field.id, 'required', e.target.checked)
+                                        onUpdateField(
+                                            field.id,
+                                            "required",
+                                            e.target.checked
+                                        )
                                     }
                                 />
                             </HStack>
                         </Flex>
 
                         {/* DEPENDENCY CONDITIONS */}
-                        {isDependency && (
+                        {hasConditions && (
                             <Box
                                 mt={3}
                                 p={2}
@@ -226,11 +205,28 @@ const FieldDefinitionListComponent = ({
                                 borderColor={isSectionDeployed ? "green.100" : "purple.100"}
                             >
                                 <Text fontSize="xs" color={isSectionDeployed ? "green.700" : "purple.700"} fontWeight="bold">
-                                    👁 Visible si :
+                                    🧠 Conditions dynamiques
                                 </Text>
-                                <Text fontSize="sm" fontWeight="medium" mt={0.5} color="gray.700">
-                                    {field.depends_on_field_id} = {field.depends_on_value}
-                                </Text>
+
+                                <HStack mt={2} spacing={2}>
+                                    {field.visibility_condition_group && (
+                                        <Badge colorScheme="orange">
+                                            Visibilité ({field.visibility_condition_group?.conditions?.length ?? 0})
+                                        </Badge>
+                                    )}
+
+                                    {field.required_condition_group && (
+                                        <Badge colorScheme="red">
+                                            Obligatoire dynamique ({field.required_condition_group?.conditions?.length ?? 0})
+                                        </Badge>
+                                    )}
+
+                                    {field.enabled_condition_group && (
+                                        <Badge colorScheme="blue">
+                                            Activé ({field.enabled_condition_group?.conditions?.length ?? 0})
+                                        </Badge>
+                                    )}
+                                </HStack>
                             </Box>
                         )}
                     </Box>
