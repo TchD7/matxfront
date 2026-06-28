@@ -1,6 +1,6 @@
 import React from 'react';
 import { FormControl, FormHelperText, Checkbox } from '@chakra-ui/react';
-import { BaseFieldProps } from '../types/formDynamicTypes';
+import type { BaseFieldProps } from '../types/formDynamicTypes';
 
 export const CheckboxField: React.FC<BaseFieldProps> = React.memo(({ field, isEditing, onChange }) => {
     return (

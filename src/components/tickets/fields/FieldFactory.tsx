@@ -1,45 +1,68 @@
 import React from 'react';
-import { BaseFieldProps } from '../types/formDynamicTypes';
+import { Box } from '@chakra-ui/react';
+import type { BaseFieldProps } from '../types/formDynamicTypes';
+
+// Importations regroupées
 import { TextField, TextAreaField } from './TextField';
 import { NumberField } from './NumberField';
 import { CheckboxField } from './CheckboxField';
 import { DateField, TimeField, DateTimeField } from './DateField';
-import { SelectField, MultiSelectField, RadioField } from './SelectField';
-import { ImageField, FileField } from './ImageField';
+import { SelectField } from './SelectField';
+import { MultiSelectField } from './MultiSelectField';
+import { RadioField } from './RadioField';
+import { ImageField } from './ImageField';
+import { FileField } from './FileField';
 import { SignatureField } from './SignatureField';
 
+// Mapping des composants pour éviter le switch géant
+const FIELD_MAP: Record<string, React.FC<BaseFieldProps>> = {
+    text: TextField,
+    textarea: TextAreaField,
+    number: NumberField,
+    checkbox: CheckboxField,
+    date: DateField,
+    time: TimeField,
+    datetime: DateTimeField,
+    select: SelectField,
+    multi_select: MultiSelectField,
+    radio: RadioField,
+    image: ImageField,
+    file: FileField,
+    signature: SignatureField,
+};
+
 export const FieldFactory: React.FC<BaseFieldProps> = ({ field, isEditing, onChange }) => {
-    // Si le champ n'est pas marqué comme visible par l'engine du backend, on l'exclut totalement du DOM
     if (!field.visible) return null;
 
-    switch (field.type) {
-        case 'text':
-            return <TextField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'textarea':
-            return <TextAreaField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'number':
-            return <NumberField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'checkbox':
-            return <CheckboxField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'date':
-            return <DateField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'time':
-            return <TimeField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'datetime':
-            return <DateTimeField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'select':
-            return <SelectField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'multi_select':
-            return <MultiSelectField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'radio':
-            return <RadioField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'image':
-            return <ImageField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'file':
-            return <FileField field={field} isEditing={isEditing} onChange={onChange} />;
-        case 'signature':
-            return <SignatureField field={field} isEditing={isEditing} onChange={onChange} />;
-        default:
-            return null;
+    const FieldComponent = FIELD_MAP[field.type];
+
+    // Rendu du composant trouvé ou message d'erreur
+    const component = FieldComponent ? (
+        <FieldComponent field={field} isEditing={isEditing} onChange={onChange} />
+    ) : (
+        <Box p={4} borderWidth="1px" borderRadius="md" borderColor="red.200" bg="red.50">
+            Type de champ inconnu : <b>{field.type}</b>
+        </Box>
+    );
+
+    // Conteneur spécifique pour les médias en lecture seule
+    const isMediaField = ['image', 'file', 'signature'].includes(field.type);
+
+    if (!isEditing && isMediaField) {
+        return (
+            <Box
+                w="100%"
+                p={2}
+                borderWidth="1px"
+                borderStyle="dashed"
+                borderColor="gray.200"
+                borderRadius="lg"
+                bg="gray.50"
+            >
+                {component}
+            </Box>
+        );
     }
+
+    return component;
 };

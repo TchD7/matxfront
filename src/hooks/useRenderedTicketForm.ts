@@ -7,12 +7,21 @@ const DEFAULT_DEBOUNCE_MS = 700;
 // --- Interfaces correspondant au backend Django DRF ---
 interface TicketFieldValueApi {
     id: number | string;
-    field_id: number | string; // Clé métier corrigée
+    field_id: number |string;
     ticket?: string | number;
+
     code?: string;
     label?: string;
     field_type?: string;
+
     value: any;
+    file?: {
+        id: number;
+        url: string;
+        original_name: string;
+        content_type: string;
+        size: number;
+    } | null;
 }
 
 // --- Fonctions Utilitaires ---
@@ -111,14 +120,31 @@ export function useRenderedTicketForm(
 
             // Écrasement par les valeurs existantes en base (ciblage strict sur field_id)
             valuesData.forEach((item) => {
-                if (!item.field_id) return;
-                
-                const key = String(item.field_id);
-                const field = fieldMap.get(key);
-                
-                updatedValues[key] = field ? normalizeTicketValue(field, item.value) : item.value;
-                updatedRecordIds[key] = item.id; // Stockage de l'ID de la ligne pour les futurs PATCH
-            });
+    if (!item.field_id) return;
+
+    const key = String(item.field_id);
+    const field = fieldMap.get(key);
+
+    if (!field) return;
+
+    let fieldValue = item.value;
+
+    if (
+        (field.type === "image" ||
+         field.type === "signature" ||
+         field.type === "file") &&
+        item.file
+    ) {
+        fieldValue = item.file.url;
+    }
+
+    updatedValues[key] = normalizeTicketValue(
+        field,
+        fieldValue
+    );
+
+    updatedRecordIds[key] = item.id;
+});
 
             setSections(renderData);
             setValues(updatedValues);

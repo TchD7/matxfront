@@ -1,6 +1,6 @@
 import React from 'react';
 import { FormControl, FormLabel, FormHelperText, Input, InputGroup, InputRightElement } from '@chakra-ui/react';
-import { BaseFieldProps } from '../types/formDynamicTypes';
+import type { BaseFieldProps } from '../types/formDynamicTypes';
 
 export const NumberField: React.FC<BaseFieldProps> = React.memo(({ field, isEditing, onChange }) => {
     const handleNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {

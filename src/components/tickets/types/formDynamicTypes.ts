@@ -30,15 +30,21 @@ export interface RenderedField {
     code: string;
     label: string;
     type: FieldType;
+
     value: unknown;
+    file?: FieldFile | null;
+
     default_value: unknown;
     required: boolean;
     enabled: boolean;
     visible: boolean;
+
     placeholder?: string;
     help_text?: string;
     unit?: string;
+
     options?: FieldOptionInput[];
+
     depends_on_field_id?: number | null;
     depends_on_value?: unknown;
 }
@@ -46,7 +52,7 @@ export interface RenderedField {
 export interface RenderedSection {
     section_id: number;
     section_title: string;
-    section_code: string;
+    section_code?: string;
     section_description?: string;
     fields: RenderedField[];
 }
@@ -60,4 +66,11 @@ export interface BaseFieldProps {
     field: RenderedField;
     isEditing: boolean;
     onChange: (fieldId: number, value: unknown) => void;
+}
+export interface FieldFile {
+    id: number;
+    url: string;
+    original_name: string;
+    content_type: string;
+    size: number;
 }

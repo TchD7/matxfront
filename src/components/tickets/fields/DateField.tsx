@@ -1,6 +1,6 @@
 import React from 'react';
 import { FormControl, FormLabel, FormHelperText, Input } from '@chakra-ui/react';
-import { BaseFieldProps } from '../types/formDynamicTypes';
+import type{ BaseFieldProps } from '../types/formDynamicTypes';
 
 const createTemporalField = (type: 'date' | 'time' | 'datetime-local', displayName: string) => {
     const Component: React.FC<BaseFieldProps> = ({ field, isEditing, onChange }) => (

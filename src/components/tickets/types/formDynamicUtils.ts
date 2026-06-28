@@ -1,4 +1,4 @@
-import { FieldOptionInput, NormalizedFieldOption } from './formDynamicTypes';
+import type { FieldOptionInput, NormalizedFieldOption } from './formDynamicTypes';
 
 export const normalizeOptions = (options?: FieldOptionInput[]): NormalizedFieldOption[] => {
     if (!options) return [];

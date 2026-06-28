@@ -1,88 +1,123 @@
+import React, { useMemo } from 'react';
 import {
-    Accordion,
-    AccordionButton,
-    AccordionIcon,
-    AccordionItem,
-    AccordionPanel,
-    Box,
-    FormControl,
-    FormLabel,
-    HStack,
-    StackDivider,
+    SimpleGrid,
+    Heading,
     Text,
     VStack,
+    Box,
+    Accordion,
+    AccordionItem,
+    AccordionButton,
+    AccordionPanel,
+    AccordionIcon,
 } from '@chakra-ui/react';
-import type { RenderSection } from '../../types/formRender.types';
-import { RenderFieldInput } from './RenderFieldInput';
+
+import type { RenderedSection } from '../tickets/types/formDynamicTypes';
+//import { FieldDefinition } from '../tickets/types/formDynamicTypes';
+import { FieldFactory } from '../tickets/fields/FieldFactory';
 
 interface RenderFormRendererProps {
-    sections: RenderSection[];
-    values: Record<string, any>;
+    sections: RenderedSection[];
+    values: Record<number, unknown>;
     isEditing: boolean;
-    onChange: (fieldId: string | number, value: any) => void;
+    onChange: (fieldId: number, value: unknown) => void;
 }
 
-export function RenderFormRenderer({ sections, values, isEditing, onChange }: RenderFormRendererProps) {
+export const RenderFormRenderer: React.FC<RenderFormRendererProps> = ({
+    sections,
+    values, // Note: si values contient déjà les données brutes de l'API, on n'en a même plus besoin ici pour initialiser, mais on le garde pour les mises à jour.
+    isEditing,
+    onChange,
+}) => {
+    const computedSections = useMemo(() => {
+        if (!sections) return [];
+        return sections
+            .map(section => {
+                // On mappe les champs pour gérer l'objet "file" provenant de l'API
+                const mappedFields = (section.fields || []).map((f: any) => {
+
+                    // --- LA CORRECTION EST ICI ---
+                    // Si c'est un champ média et qu'il y a un objet file avec une url
+                    let correctValue = f.value;
+                    if (['image', 'file', 'signature'].includes(f.type || f.field_type) && f.file?.url) {
+                        correctValue = f.file.url;
+                    }
+
+                    // On retourne le champ en forçant la bonne valeur
+                    return {
+                        ...f,
+                        // On donne la priorité à la valeur locale "values" (si l'utilisateur a modifié), 
+                        // sinon on prend la valeur corrigée (URL de l'image)
+                        value: values[f.id] !== undefined ? values[f.id] : correctValue
+                    };
+                });
+
+                return {
+                    ...section,
+                    visibleFields: mappedFields.filter(f => f.visible)
+                };
+            })
+            .filter(section => section.visibleFields.length > 0);
+    }, [sections, values]); // N'oubliez pas d'ajouter "values" aux dépendances
+
+    // ... (le reste de votre code reste identique à partir de if (computedSections.length === 0))
+
+    if (computedSections.length === 0) {
+        return (
+            <Box
+                textAlign="center"
+                py={10}
+                borderWidth="1px"
+                borderStyle="dashed"
+                borderRadius="lg"
+                bg="gray.50"
+            >
+                <Text color="gray.500" fontSize="sm">
+                    Aucun champ disponible
+                </Text>
+            </Box>
+        );
+    }
+
+    const defaultExpandedIndices = computedSections.map((_, index) => index);
+
     return (
-        <Accordion allowMultiple defaultIndex={sections.map((_, index) => index)}>
-            {sections.map((section) => (
-                <AccordionItem
-                    key={section.section_id}
-                    border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="xl"
-                    mb={5}
-                    overflow="hidden"
-                    shadow="sm"
-                    bg="gray.50"
-                >
-                    <AccordionButton _expanded={{ bg: 'white', borderBottom: '1px solid', borderColor: 'gray.100' }} p={4}>
-                        <Box as="span" flex="1" textAlign="left" fontWeight="bold" fontSize="md" color="gray.700">
-                            {section.section_title}
-                        </Box>
-                        <AccordionIcon color="purple.500" />
-                    </AccordionButton>
-                    <AccordionPanel pb={5} pt={4} bg="white">
-                        <VStack spacing={4} align="stretch" divider={<StackDivider borderColor="gray.100" />}>
-                            {section.fields?.map((field) => {
-                                const isCheckbox = field.type === 'checkbox';
-                                return (
-                                    <Box key={field.id} py={2}>
-                                        {isEditing ? (
-                                            <FormControl isRequired={field.required}>
-                                                {!isCheckbox && (
-                                                    <FormLabel
-                                                        fontSize="xs"
-                                                        fontWeight="bold"
-                                                        color="gray.500"
-                                                        textTransform="uppercase"
-                                                        letterSpacing="wider"
-                                                        mb={1}
-                                                    >
-                                                        {field.label}
-                                                    </FormLabel>
-                                                )}
-                                                <RenderFieldInput field={field} value={values[String(field.id)]} onChange={onChange} />
-                                            </FormControl>
-                                        ) : (
-                                            <VStack align="stretch" spacing={1}>
-                                                <Text fontSize="xs" fontWeight="semibold" color="gray.400" textTransform="uppercase">
-                                                    {field.label} {field.required && <Text as="span" color="red.500">*</Text>}
-                                                </Text>
-                                                <Box pl={1}>
-                                                    <Text color="gray.800" fontWeight="medium" fontSize="sm">
-                                                        {String(values[String(field.id)] ?? '')}
-                                                    </Text>
-                                                </Box>
-                                            </VStack>
-                                        )}
+        <Accordion allowMultiple defaultIndex={defaultExpandedIndices} w="100%">
+            <VStack spacing={6} align="stretch" w="100%">
+                {computedSections.map((section) => (
+                    <AccordionItem
+                        key={section.section_id}
+                        borderWidth="1px" borderRadius="xl" borderColor="gray.200" boxShadow="sm" bg="white" overflow="hidden"
+                    >
+                        <h2>
+                            <AccordionButton bg="gray.50" _hover={{ bg: 'gray.100' }} py={4} px={5}>
+                                <Box flex="1" textAlign="left">
+                                    <Heading size="sm" color="gray.800">{section.section_title}</Heading>
+                                    {section.section_description && (
+                                        <Text fontSize="xs" color="gray.500" mt={1}>{section.section_description}</Text>
+                                    )}
+                                </Box>
+                                <AccordionIcon color="gray.500" />
+                            </AccordionButton>
+                        </h2>
+
+                        <AccordionPanel pb={6} pt={6} px={5} borderTop="1px solid" borderColor="gray.100">
+                            <SimpleGrid columns={{ base: 1, md: 2 }} spacingX={8} spacingY={2}>
+                                {section.visibleFields.map((field) => (
+                                    <Box key={field.id} w="100%">
+                                        <FieldFactory
+                                            field={field}
+                                            isEditing={isEditing}
+                                            onChange={onChange}
+                                        />
                                     </Box>
-                                );
-                            })}
-                        </VStack>
-                    </AccordionPanel>
-                </AccordionItem>
-            ))}
+                                ))}
+                            </SimpleGrid>
+                        </AccordionPanel>
+                    </AccordionItem>
+                ))}
+            </VStack>
         </Accordion>
     );
-}
+};
+
