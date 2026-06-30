@@ -114,8 +114,9 @@ const useTicketActions = (
                 }),
                 complete: () => completeTicket(ticket.id, {
                     technician_id: user?.id || 1,
-                    result: payload?.result || 'ok',
-                    comment: payload?.comment || 'Clôture intervention',
+                    result: payload?.result,
+                    reason: payload?.reason,
+                    comment: payload?.comment,
                 }),
                 close: () => closeTicket(ticket.id),
                 delete: () => deleteTicket(ticket.id),

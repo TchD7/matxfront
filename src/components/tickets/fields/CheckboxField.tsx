@@ -1,20 +1,41 @@
 import React from 'react';
-import { FormControl, FormHelperText, Checkbox } from '@chakra-ui/react';
+import { Checkbox, FormControl, FormLabel, Badge, Box } from '@chakra-ui/react';
 import type { BaseFieldProps } from '../types/formDynamicTypes';
 
-export const CheckboxField: React.FC<BaseFieldProps> = React.memo(({ field, isEditing, onChange }) => {
+export const CheckboxField: React.FC<BaseFieldProps> = ({ field, isEditing, onChange }) => {
+    // On s'assure que la valeur est bien un booléen
+    const isChecked = !!field.value;
+
+    // MODE LECTURE SEULE
+    if (!isEditing) {
+        return (
+            <Box>
+                <FormLabel mb={1} color="gray.600" fontSize="sm" fontWeight="normal">
+                    {field.label}
+                </FormLabel>
+                <Badge
+                    colorScheme={isChecked ? 'green' : 'gray'}
+                    fontSize="sm"
+                    px={2}
+                    py={0.5}
+                    borderRadius="md"
+                >
+                    {isChecked ? 'Oui' : 'Non'}
+                </Badge>
+            </Box>
+        );
+    }
+
+    // MODE ÉDITION
     return (
-        <FormControl isRequired={field.required} isDisabled={!field.enabled || !isEditing} pt={6}>
+        <FormControl display="flex" alignItems="center">
             <Checkbox
-                isChecked={Boolean(field.value)}
+                isChecked={isChecked}
                 onChange={(e) => onChange(field.id, e.target.checked)}
                 colorScheme="purple"
-                aria-label={field.label}
             >
                 {field.label}
             </Checkbox>
-            {field.help_text && <FormHelperText color="gray.500">{field.help_text}</FormHelperText>}
         </FormControl>
     );
-});
-CheckboxField.displayName = 'CheckboxField';
+};

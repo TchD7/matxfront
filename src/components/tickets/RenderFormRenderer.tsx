@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import {
-    SimpleGrid,
     Heading,
     Text,
     VStack,
@@ -10,14 +9,36 @@ import {
     AccordionButton,
     AccordionPanel,
     AccordionIcon,
+    Grid,
+    GridItem,
 } from '@chakra-ui/react';
 
 import type { RenderedSection } from '../tickets/types/formDynamicTypes';
-//import { FieldDefinition } from '../tickets/types/formDynamicTypes';
 import { FieldFactory } from '../tickets/fields/FieldFactory';
 
+// On crée une interface locale qui hérite de RenderedSection et intègre la structure calculée
+
+
+// 1. On retire proprement 'fields' ET 'section_id' du type d'origine pour éviter tout conflit
+type BaseSectionWithoutIdOrFields = Omit<RenderedSection, 'fields' | 'section_id'>;
+
+// 2. On crée notre interface locale étendue sans aucun risque de mauvaise surcharge
+interface LocalExtendedSection extends BaseSectionWithoutIdOrFields {
+    section_id: number | string;
+    fields?: any[];
+    visibleFields: any[];
+}
+
 interface RenderFormRendererProps {
-    sections: RenderedSection[];
+    sections: any[];
+    values: Record<number, unknown>;
+    isEditing: boolean;
+    onChange: (fieldId: number, value: unknown) => void;
+}
+
+
+interface RenderFormRendererProps {
+    sections: any[]; // On accepte le tableau brut du parent pour l'assouplir
     values: Record<number, unknown>;
     isEditing: boolean;
     onChange: (fieldId: number, value: unknown) => void;
@@ -25,29 +46,24 @@ interface RenderFormRendererProps {
 
 export const RenderFormRenderer: React.FC<RenderFormRendererProps> = ({
     sections,
-    values, // Note: si values contient déjà les données brutes de l'API, on n'en a même plus besoin ici pour initialiser, mais on le garde pour les mises à jour.
+    values,
     isEditing,
     onChange,
 }) => {
-    const computedSections = useMemo(() => {
+    // Le reste du code reste strictement identique, mais TS sait maintenant 
+    // exactement à quoi correspond "section.visibleFields" et accepte le type du parent !
+    const computedSections = useMemo<LocalExtendedSection[]>(() => {
         if (!sections) return [];
         return sections
             .map(section => {
-                // On mappe les champs pour gérer l'objet "file" provenant de l'API
                 const mappedFields = (section.fields || []).map((f: any) => {
-
-                    // --- LA CORRECTION EST ICI ---
-                    // Si c'est un champ média et qu'il y a un objet file avec une url
                     let correctValue = f.value;
                     if (['image', 'file', 'signature'].includes(f.type || f.field_type) && f.file?.url) {
                         correctValue = f.file.url;
                     }
 
-                    // On retourne le champ en forçant la bonne valeur
                     return {
                         ...f,
-                        // On donne la priorité à la valeur locale "values" (si l'utilisateur a modifié), 
-                        // sinon on prend la valeur corrigée (URL de l'image)
                         value: values[f.id] !== undefined ? values[f.id] : correctValue
                     };
                 });
@@ -55,12 +71,11 @@ export const RenderFormRenderer: React.FC<RenderFormRendererProps> = ({
                 return {
                     ...section,
                     visibleFields: mappedFields.filter(f => f.visible)
+
                 };
             })
             .filter(section => section.visibleFields.length > 0);
-    }, [sections, values]); // N'oubliez pas d'ajouter "values" aux dépendances
-
-    // ... (le reste de votre code reste identique à partir de if (computedSections.length === 0))
+    }, [sections, values]);
 
     if (computedSections.length === 0) {
         return (
@@ -102,17 +117,29 @@ export const RenderFormRenderer: React.FC<RenderFormRendererProps> = ({
                         </h2>
 
                         <AccordionPanel pb={6} pt={6} px={5} borderTop="1px solid" borderColor="gray.100">
-                            <SimpleGrid columns={{ base: 1, md: 2 }} spacingX={8} spacingY={2}>
-                                {section.visibleFields.map((field) => (
-                                    <Box key={field.id} w="100%">
-                                        <FieldFactory
-                                            field={field}
-                                            isEditing={isEditing}
-                                            onChange={onChange}
-                                        />
-                                    </Box>
-                                ))}
-                            </SimpleGrid>
+                            <Grid
+                                templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }}
+                                gap={6}
+                                alignItems="start"
+                            >
+                                {section.visibleFields.map((field) => {
+                                    const isFullWidthField = ['textarea', 'image', 'signature', 'file'].includes(field.type || field.field_type);
+
+                                    return (
+                                        <GridItem
+                                            key={field.id}
+                                            colSpan={{ base: 1, md: isFullWidthField ? 2 : 1 }}
+                                            w="100%"
+                                        >
+                                            <FieldFactory
+                                                field={field}
+                                                isEditing={isEditing}
+                                                onChange={onChange}
+                                            />
+                                        </GridItem>
+                                    );
+                                })}
+                            </Grid>
                         </AccordionPanel>
                     </AccordionItem>
                 ))}
@@ -120,4 +147,3 @@ export const RenderFormRenderer: React.FC<RenderFormRendererProps> = ({
         </Accordion>
     );
 };
-

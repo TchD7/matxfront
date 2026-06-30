@@ -135,12 +135,12 @@ export default function TicketResultTab({
                 status: 'success',
             });
 
-            // On active le verrou AVANT de lancer onRefresh()
             isRefreshingRef.current = true;
-            setIsEditing(false); // On masque directement les champs de saisie
+            setIsEditing(false);
 
             onRefresh();
         } catch (err: any) {
+            // Capturation propre du format DRF {"detail": "..."}
             toast({
                 title: 'Erreur enregistrement résultat',
                 description: err.response?.data?.detail || "Une erreur est survenue",
@@ -161,9 +161,10 @@ export default function TicketResultTab({
     }
 
     const isNok = form.result === 'nok';
+    const isClosed = ticket.status === 'closed'; // Gèle l'interface si archivé
 
-    // On affiche la vue lecture seule si on n'est pas en train d'éditer ET (soit le ticket a un résultat, soit le verrou est actif)
-    const showReadOnlyView = !isEditing && (ticket.result || isRefreshingRef.current);
+    // On affiche la vue lecture seule si on n'est pas en train d'éditer OU si le ticket est clos
+    const showReadOnlyView = (!isEditing && (ticket.result || isRefreshingRef.current)) || isClosed;
 
     const selectedReasonLabel = reasons.find(r => r.id === form.reason)?.label || `ID: ${form.reason}`;
 
@@ -175,19 +176,20 @@ export default function TicketResultTab({
                 <HStack justify="space-between">
                     <HStack>
                         <Text fontWeight="bold">Statut du ticket :</Text>
-                        <Badge colorScheme="purple" px={2} py={0.5} borderRadius="md">
+                        <Badge colorScheme={isClosed ? "red" : "purple"} px={2} py={0.5} borderRadius="md">
                             {ticket.status}
                         </Badge>
                     </HStack>
 
-                    {showReadOnlyView && (
+                    {/* On cache le bouton d'édition SI le ticket est "closed" */}
+                    {showReadOnlyView && !isClosed && (
                         <IconButton
                             icon={<FiEdit2 />}
                             aria-label="Modifier le résultat"
                             colorScheme="blue"
                             variant="ghost"
                             onClick={() => {
-                                isRefreshingRef.current = false; // On désactive le verrou si l'utilisateur force l'édition manuel
+                                isRefreshingRef.current = false;
                                 setIsEditing(true);
                             }}
                         />
@@ -198,9 +200,9 @@ export default function TicketResultTab({
 
                 {/* ================= MODE 1 : VUE RÉSULTAT (LECTURE SEULE) ================= */}
                 {showReadOnlyView && (
-                    <VStack align="stretch" spacing={4} bg="gray.50" p={4} borderRadius="lg" borderWidth="1px">
-                        <Heading size="xs" textTransform="uppercase" color="gray.500" letterSpacing="wider">
-                            Résultat Enregistré
+                    <VStack align="stretch" spacing={4} bg={isClosed ? "orange.50" : "gray.50"} p={4} borderRadius="lg" borderWidth="1px" borderColor={isClosed ? "orange.200" : "gray.200"}>
+                        <Heading size="xs" textTransform="uppercase" color={isClosed ? "orange.700" : "gray.500"} letterSpacing="wider">
+                            {isClosed ? "Résultat Verrouillé (Archivé)" : "Résultat Enregistré"}
                         </Heading>
 
                         <HStack>
@@ -233,10 +235,9 @@ export default function TicketResultTab({
                     </VStack>
                 )}
 
-                {/* ================= MODE 2 : FORMULAIRE D'ÉDITION ================= */}
-                {isEditing && (
+                {/* ================= MODE 2 : FORMULAIRE D'ÉDITION (Uniquement si NON closed) ================= */}
+                {isEditing && !isClosed && (
                     <VStack spacing={5} align="stretch">
-
                         <FormControl>
                             <FormLabel fontWeight="semibold">Résultat</FormLabel>
                             <Select
@@ -331,5 +332,5 @@ export default function TicketResultTab({
                 )}
             </VStack>
         </Box>
-    );
-}
+    )
+};

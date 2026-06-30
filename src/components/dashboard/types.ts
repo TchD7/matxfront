@@ -7,13 +7,14 @@ export interface Ticket {
   id: string; // UUID
   number?: string;
 
-  status: 'draft' | 'planned' | 'in_progress' | 'completed' | 'closed';
+  status: 'draft' | 'planned' | 'in_progress' | 'completed' | 'closed' | 'paused';
 
   equipment_name?: string;
 
   completed_by_name?: string | null;
   assigned_to_name?: string | null;
   technician_name?: string | null;
+ 
 
   planned_at?: string | null;   // ISO date
   created_at?: string;          // ISO date

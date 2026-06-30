@@ -46,6 +46,7 @@ interface DowntimeLog {
 }
 
 interface Ticket {
+    status: string;
     id: number;
     equipment?: number | { id: number };
     downtime_logs?: DowntimeLog[];
@@ -256,10 +257,8 @@ export default function TicketDowntimeTab({
         }
     };
 
-    // ============================================================
-    // CANCEL DOWNTIME
-    // ============================================================
 
+    // ================= SUBMIT CANCEL =================
     const handleCancelDowntime = async () => {
         if (!ongoingLog) return;
 
@@ -290,6 +289,7 @@ export default function TicketDowntimeTab({
         }
     };
 
+    // ================= UI CALCULATIONS =================
     if (!ticket) {
         return (
             <Center py={10}>
@@ -297,6 +297,8 @@ export default function TicketDowntimeTab({
             </Center>
         );
     }
+
+    const isClosed = ticket.status === 'closed'; // Variable barrière
 
     return (
         <Box p={4}>
@@ -308,190 +310,206 @@ export default function TicketDowntimeTab({
                             Gestion du downtime machine
                         </Heading>
 
-                        {!ongoingLog ? (
-                            <VStack align="stretch" spacing={4}>
-                                {!showCreateForm ? (
-                                    <Button
-                                        colorScheme="orange"
-                                        size="lg"
-                                        onClick={() => {
-                                            setStartDate(getNowDate());
-                                            setStartTime(getNowTime());
-                                            setShowCreateForm(true);
-                                        }}
-                                    >
-                                        Déclarer un arrêt machine
-                                    </Button>
-                                ) : (
-                                    <VStack
-                                        align="stretch"
-                                        spacing={4}
-                                        p={4}
-                                        borderWidth="1px"
-                                        borderRadius="lg"
-                                        bg="orange.50"
-                                        borderColor="orange.200"
-                                    >
-                                        <Text fontWeight="bold" fontSize="sm" color="orange.700">
-                                            Début du downtime
-                                        </Text>
-
-                                        <HStack spacing={4}>
-                                            <FormControl isRequired>
-                                                <FormLabel fontSize="xs">Date</FormLabel>
-                                                <Input
-                                                    type="date"
-                                                    bg="white"
-                                                    value={startDate}
-                                                    onChange={(e) => setStartDate(e.target.value)}
-                                                />
-                                            </FormControl>
-
-                                            <FormControl isRequired>
-                                                <FormLabel fontSize="xs">Heure</FormLabel>
-                                                <Input
-                                                    type="time"
-                                                    bg="white"
-                                                    value={startTime}
-                                                    onChange={(e) => setStartTime(e.target.value)}
-                                                />
-                                            </FormControl>
-                                        </HStack>
-
-                                        <FormControl>
-                                            <FormLabel fontSize="xs">Cause initiale</FormLabel>
-                                            <Input
-                                                bg="white"
-                                                placeholder="Ex: Surchauffe, coupure, bourrage..."
-                                                value={createReason}
-                                                onChange={(e) => setCreateReason(e.target.value)}
-                                            />
-                                        </FormControl>
-
-                                        <HStack justify="flex-end">
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                onClick={() => setShowCreateForm(false)}
-                                            >
-                                                Retour
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                colorScheme="orange"
-                                                isLoading={loading}
-                                                onClick={handleStartDowntime}
-                                            >
-                                                Démarrer le downtime
-                                            </Button>
-                                        </HStack>
-                                    </VStack>
-                                )}
-                            </VStack>
+                        {/* ÉCRAN SÉCURISÉ : LE TICKET EST CLÔTURÉ */}
+                        {isClosed ? (
+                            <Alert status="info" variant="solid" borderRadius="lg" bg="gray.100" color="gray.800">
+                                <AlertIcon color="gray.500" />
+                                <Box>
+                                    <AlertTitle fontWeight="bold">Historique verrouillé</AlertTitle>
+                                    <AlertDescription fontSize="sm">
+                                        Ce ticket est clôturé. Les données d'arrêt machine associées sont passées en lecture seule.
+                                    </AlertDescription>
+                                </Box>
+                            </Alert>
                         ) : (
-                            <VStack align="stretch" spacing={4}>
-                                <Alert status="warning" borderRadius="lg" variant="subtle">
-                                    <AlertIcon />
-                                    <Box flex="1">
-                                        <AlertTitle>Downtime actif</AlertTitle>
-                                        <AlertDescription fontSize="sm">
-                                            Début : {formatDateTime(ongoingLog.start_time)}
-                                        </AlertDescription>
-                                    </Box>
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        colorScheme="gray"
-                                        isLoading={loading}
-                                        onClick={handleCancelDowntime}
-                                    >
-                                        Annuler
-                                    </Button>
-                                </Alert>
+                            /* ÉCRAN NORMAL : TICKET EN COURS / OUVERT */
+                            <>
+                                {!ongoingLog ? (
+                                    <VStack align="stretch" spacing={4}>
+                                        {!showCreateForm ? (
+                                            <Button
+                                                colorScheme="orange"
+                                                size="lg"
+                                                onClick={() => {
+                                                    setStartDate(getNowDate());
+                                                    setStartTime(getNowTime());
+                                                    setShowCreateForm(true);
+                                                }}
+                                            >
+                                                Déclarer un arrêt machine
+                                            </Button>
+                                        ) : (
+                                            <VStack
+                                                align="stretch"
+                                                spacing={4}
+                                                p={4}
+                                                borderWidth="1px"
+                                                borderRadius="lg"
+                                                bg="orange.50"
+                                                borderColor="orange.200"
+                                            >
+                                                <Text fontWeight="bold" fontSize="sm" color="orange.700">
+                                                    Début du downtime
+                                                </Text>
 
-                                {!showResolveForm ? (
-                                    <Button
-                                        colorScheme="green"
-                                        size="lg"
-                                        onClick={() => {
-                                            setEndDate(getNowDate());
-                                            setEndTime(getNowTime());
-                                            setCloseReason(ongoingLog.reason || '');
-                                            setShowResolveForm(true);
-                                        }}
-                                    >
-                                        Signaler la remise en marche
-                                    </Button>
+                                                <HStack spacing={4}>
+                                                    <FormControl isRequired>
+                                                        <FormLabel fontSize="xs">Date</FormLabel>
+                                                        <Input
+                                                            type="date"
+                                                            bg="white"
+                                                            value={startDate}
+                                                            onChange={(e) => setStartDate(e.target.value)}
+                                                        />
+                                                    </FormControl>
+
+                                                    <FormControl isRequired>
+                                                        <FormLabel fontSize="xs">Heure</FormLabel>
+                                                        <Input
+                                                            type="time"
+                                                            bg="white"
+                                                            value={startTime}
+                                                            onChange={(e) => setStartTime(e.target.value)}
+                                                        />
+                                                    </FormControl>
+                                                </HStack>
+
+                                                <FormControl>
+                                                    <FormLabel fontSize="xs">Cause initiale</FormLabel>
+                                                    <Input
+                                                        bg="white"
+                                                        placeholder="Ex: Surchauffe, coupure, bourrage..."
+                                                        value={createReason}
+                                                        onChange={(e) => setCreateReason(e.target.value)}
+                                                    />
+                                                </FormControl>
+
+                                                <HStack justify="flex-end">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => setShowCreateForm(false)}
+                                                    >
+                                                        Retour
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        colorScheme="orange"
+                                                        isLoading={loading}
+                                                        onClick={handleStartDowntime}
+                                                    >
+                                                        Démarrer le downtime
+                                                    </Button>
+                                                </HStack>
+                                            </VStack>
+                                        )}
+                                    </VStack>
                                 ) : (
-                                    <VStack
-                                        align="stretch"
-                                        spacing={4}
-                                        p={4}
-                                        borderWidth="1px"
-                                        borderRadius="lg"
-                                        bg="green.50"
-                                        borderColor="green.200"
-                                    >
-                                        <Text fontWeight="bold" fontSize="sm" color="green.700">
-                                            Clôture du downtime
-                                        </Text>
-
-                                        {/* Modifié pour permettre le choix de la date de clôture */}
-                                        <HStack spacing={4}>
-                                            <FormControl isRequired>
-                                                <FormLabel fontSize="xs">Date de redémarrage</FormLabel>
-                                                <Input
-                                                    type="date"
-                                                    bg="white"
-                                                    value={endDate}
-                                                    onChange={(e) => setEndDate(e.target.value)}
-                                                />
-                                            </FormControl>
-
-                                            <FormControl isRequired>
-                                                <FormLabel fontSize="xs">Heure de redémarrage</FormLabel>
-                                                <Input
-                                                    type="time"
-                                                    bg="white"
-                                                    value={endTime}
-                                                    onChange={(e) => setEndTime(e.target.value)}
-                                                />
-                                            </FormControl>
-                                        </HStack>
-
-                                        <FormControl>
-                                            <FormLabel fontSize="xs">Cause / diagnostic final</FormLabel>
-                                            <Input
-                                                bg="white"
-                                                placeholder="Ex: moteur remplacé, réarmement thermique..."
-                                                value={closeReason}
-                                                onChange={(e) => setCloseReason(e.target.value)}
-                                            />
-                                        </FormControl>
-
-                                        <HStack justify="flex-end">
+                                    <VStack align="stretch" spacing={4}>
+                                        <Alert status="warning" borderRadius="lg" variant="subtle">
+                                            <AlertIcon />
+                                            <Box flex="1">
+                                                <AlertTitle>Downtime actif</AlertTitle>
+                                                <AlertDescription fontSize="sm">
+                                                    Début : {formatDateTime(ongoingLog.start_time)}
+                                                </AlertDescription>
+                                            </Box>
                                             <Button
                                                 size="sm"
-                                                variant="ghost"
-                                                onClick={() => setShowResolveForm(false)}
-                                            >
-                                                Retour
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                colorScheme="green"
+                                                variant="outline"
+                                                colorScheme="gray"
                                                 isLoading={loading}
-                                                onClick={handleCloseDowntime}
+                                                onClick={handleCancelDowntime}
                                             >
-                                                Clôturer
+                                                Annuler
                                             </Button>
-                                        </HStack>
+                                        </Alert>
+
+                                        {!showResolveForm ? (
+                                            <Button
+                                                colorScheme="green"
+                                                size="lg"
+                                                onClick={() => {
+                                                    setEndDate(getNowDate());
+                                                    setEndTime(getNowTime());
+                                                    setCloseReason(ongoingLog.reason || '');
+                                                    setShowResolveForm(true);
+                                                }}
+                                            >
+                                                Signaler la remise en marche
+                                            </Button>
+                                        ) : (
+                                            <VStack
+                                                align="stretch"
+                                                spacing={4}
+                                                p={4}
+                                                borderWidth="1px"
+                                                borderRadius="lg"
+                                                bg="green.50"
+                                                borderColor="green.200"
+                                            >
+                                                <Text fontWeight="bold" fontSize="sm" color="green.700">
+                                                    Clôture du downtime
+                                                </Text>
+
+                                                <HStack spacing={4}>
+                                                    <FormControl isRequired>
+                                                        <FormLabel fontSize="xs">Date de redémarrage</FormLabel>
+                                                        <Input
+                                                            type="date"
+                                                            bg="white"
+                                                            value={endDate}
+                                                            onChange={(e) => setEndDate(e.target.value)}
+                                                        />
+                                                    </FormControl>
+
+                                                    <FormControl isRequired>
+                                                        <FormLabel fontSize="xs">Heure de redémarrage</FormLabel>
+                                                        <Input
+                                                            type="time"
+                                                            bg="white"
+                                                            value={endTime}
+                                                            onChange={(e) => setEndTime(e.target.value)}
+                                                        />
+                                                    </FormControl>
+                                                </HStack>
+
+                                                <FormControl>
+                                                    <FormLabel fontSize="xs">Cause / diagnostic final</FormLabel>
+                                                    <Input
+                                                        bg="white"
+                                                        placeholder="Ex: moteur remplacé, réarmement thermique..."
+                                                        value={closeReason}
+                                                        onChange={(e) => setCloseReason(e.target.value)}
+                                                    />
+                                                </FormControl>
+
+                                                <HStack justify="flex-end">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => setShowResolveForm(false)}
+                                                    >
+                                                        Retour
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        colorScheme="green"
+                                                        isLoading={loading}
+                                                        onClick={handleCloseDowntime}
+                                                    >
+                                                        Clôturer
+                                                    </Button>
+                                                </HStack>
+                                            </VStack>
+                                        )}
                                     </VStack>
                                 )}
-                            </VStack>
+                            </>
                         )}
                     </VStack>
                 </Box>
+
 
                 {/* HISTORY */}
                 <Box bg="white" borderWidth="1px" borderRadius="xl" overflow="hidden" shadow="sm">

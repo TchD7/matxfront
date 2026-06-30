@@ -13,7 +13,7 @@ export const TicketDelayBadge = ({ ticket }: Props) => {
     // Ticket planifié et en retard (avant démarrage)
     if (status === 'planned' && is_late) {
         return (
-            <Badge colorScheme="red" variant="subtle" fontSize="sm" px={2} borderRadius="md">
+            <Badge colorScheme="red" variant="solid" >
                 RETARD : {formatDuration(late_duration_minutes)}
             </Badge>
         );

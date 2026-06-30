@@ -16,6 +16,10 @@ import {
     Center,
     List,
     ListItem,
+    Alert,
+    AlertIcon,
+    AlertTitle,
+    AlertDescription,
 } from '@chakra-ui/react';
 
 import { useEffect, useState } from 'react';
@@ -40,6 +44,7 @@ interface TicketConsumable {
 
 interface Ticket {
     id: string;
+    status?: string; // 👈 Ajouté ici pour éviter l'erreur de soulignement rouge
 }
 
 // ================= COMPONENT =================
@@ -65,7 +70,10 @@ export default function TicketConsumablesTab({
     const [showDropdown, setShowDropdown] = useState(false);
     const [quantity, setQuantity] = useState('');
 
-    // ================= LOAD TICKET CONSUMABLES (SELECTOR) =================
+    // ================= UI CALCULATIONS =================
+    const isClosed = ticket?.status === 'closed'; // Variable barrière
+
+    // ================= LOAD TICKET CONSUMABLES =================
     const loadTicketConsumables = async () => {
         if (!ticket?.id) return;
         try {
@@ -87,7 +95,7 @@ export default function TicketConsumablesTab({
         loadTicketConsumables();
     }, [ticket?.id]);
 
-    // ================= SEARCH CATALOG ASYNC (SELECTOR) =================
+    // ================= SEARCH CATALOG ASYNC =================
     useEffect(() => {
         const delayDebounceFn = setTimeout(async () => {
             if (searchQuery.trim().length < 2) {
@@ -100,19 +108,17 @@ export default function TicketConsumablesTab({
             } catch {
                 // Erreur silencieuse pour la recherche à la volée
             }
-        }, 300); // Debounce de 300ms pour économiser le serveur
+        }, 300);
 
         return () => clearTimeout(delayDebounceFn);
     }, [searchQuery]);
 
-    // ================= ADD CONSUMABLE (SERVICE) =================
+    // ================= ADD CONSUMABLE =================
     const addConsumable = async () => {
-        if (!selectedConsumable || !quantity) return;
+        if (!selectedConsumable || !quantity || isClosed) return;
 
         try {
             setLoading(true);
-
-            // Payload aligné avec notre TicketConsumableService
             await api.post('/api/v1/ticket-consumables/', {
                 ticket: ticket.id,
                 consumable: selectedConsumable.id,
@@ -124,14 +130,12 @@ export default function TicketConsumablesTab({
                 status: 'success',
             });
 
-            // Reset du formulaire
             setSelectedConsumable(null);
             setSearchQuery('');
             setQuantity('');
 
-            // Rechargement des données
             loadTicketConsumables();
-            onRefresh(); // Notifie le parent si besoin
+            onRefresh();
 
         } catch (err: any) {
             toast({
@@ -144,8 +148,9 @@ export default function TicketConsumablesTab({
         }
     };
 
-    // ================= REMOVE CONSUMABLE (SERVICE) =================
+    // ================= REMOVE CONSUMABLE =================
     const removeConsumable = async (id: number) => {
+        if (isClosed) return;
         try {
             await api.delete(`/api/v1/ticket-consumables/${id}/`);
             toast({ title: 'Consommable retiré', status: 'success' });
@@ -169,82 +174,93 @@ export default function TicketConsumablesTab({
         <Box p={4}>
             <VStack spacing={6} align="stretch">
 
-                {/* FORMULAIRE D'AJOUT ALIGNÉ */}
-                <HStack spacing={4} align="flex-start">
+                {/* CONDITION : FORMULAIRE OU BANDEAU SÉCURISÉ */}
+                {isClosed ? (
+                    <Alert status="info" variant="solid" borderRadius="lg" bg="gray.100" color="gray.800">
+                        <AlertIcon color="gray.500" />
+                        <Box>
+                            <AlertTitle fontWeight="bold">Sortie de stock verrouillée</AlertTitle>
+                            <AlertDescription fontSize="sm">
+                                Ce ticket est clôturé. L'inventaire des pièces et consommables utilisés est passé en lecture seule.
+                            </AlertDescription>
+                        </Box>
+                    </Alert>
+                ) : (
+                    <HStack spacing={4} align="flex-start">
+                        {/* Recherche Asynchrone */}
+                        <Box position="relative" flex={2}>
+                            <Input
+                                placeholder="Rechercher un consommable (ex: Câble, Vis...)"
+                                value={searchQuery}
+                                onChange={(e) => {
+                                    setSearchQuery(e.target.value);
+                                    setShowDropdown(true);
+                                    if (selectedConsumable) setSelectedConsumable(null);
+                                }}
+                                onFocus={() => setShowDropdown(true)}
+                            />
+                            {selectedConsumable && (
+                                <Text fontSize="xs" color="purple.600" mt={1} fontWeight="semibold">
+                                    Sélectionné : {selectedConsumable.name} ({selectedConsumable.unit})
+                                </Text>
+                            )}
 
-                    {/* Recherche Asynchrone */}
-                    <Box position="relative" flex={2}>
+                            {/* Dropdown flottant */}
+                            {showDropdown && searchResults.length > 0 && (
+                                <List
+                                    position="absolute"
+                                    top="110%"
+                                    left={0}
+                                    right={0}
+                                    bg="white"
+                                    border="1px solid"
+                                    borderColor="gray.200"
+                                    borderRadius="md"
+                                    boxShadow="md"
+                                    zIndex={10}
+                                    maxH="200px"
+                                    overflowY="auto"
+                                >
+                                    {searchResults.map((c) => (
+                                        <ListItem
+                                            key={c.id}
+                                            px={4}
+                                            py={2}
+                                            _hover={{ bg: 'purple.50', cursor: 'pointer' }}
+                                            onClick={() => {
+                                                setSelectedConsumable(c);
+                                                setSearchQuery(c.name);
+                                                setShowDropdown(false);
+                                            }}
+                                            fontSize="sm"
+                                        >
+                                            <strong>{c.name}</strong> — {c.unit}
+                                        </ListItem>
+                                    ))}
+                                </List>
+                            )}
+                        </Box>
+
+                        {/* Champ Quantité */}
                         <Input
-                            placeholder="Rechercher un consommable (ex: Câble, Vis...)"
-                            value={searchQuery}
-                            onChange={(e) => {
-                                setSearchQuery(e.target.value);
-                                setShowDropdown(true);
-                                if (selectedConsumable) setSelectedConsumable(null);
-                            }}
-                            onFocus={() => setShowDropdown(true)}
+                            flex={1}
+                            type="number"
+                            placeholder="Quantité"
+                            value={quantity}
+                            onChange={(e) => setQuantity(e.target.value)}
                         />
-                        {selectedConsumable && (
-                            <Text fontSize="xs" color="purple.600" mt={1} fontWeight="semibold">
-                                Sélectionné : {selectedConsumable.name} ({selectedConsumable.unit})
-                            </Text>
-                        )}
 
-                        {/* Dropdown flottant des résultats de recherche */}
-                        {showDropdown && searchResults.length > 0 && (
-                            <List
-                                position="absolute"
-                                top="110%"
-                                left={0}
-                                right={0}
-                                bg="white"
-                                border="1px solid"
-                                borderColor="gray.200"
-                                borderRadius="md"
-                                boxShadow="md"
-                                zIndex={10}
-                                maxH="200px"
-                                overflowY="auto"
-                            >
-                                {searchResults.map((c) => (
-                                    <ListItem
-                                        key={c.id}
-                                        px={4}
-                                        py={2}
-                                        _hover={{ bg: 'purple.50', cursor: 'pointer' }}
-                                        onClick={() => {
-                                            setSelectedConsumable(c);
-                                            setSearchQuery(c.name);
-                                            setShowDropdown(false);
-                                        }}
-                                        fontSize="sm"
-                                    >
-                                        <strong>{c.name}</strong> — {c.unit}
-                                    </ListItem>
-                                ))}
-                            </List>
-                        )}
-                    </Box>
-
-                    {/* Champ Quantité */}
-                    <Input
-                        flex={1}
-                        type="number"
-                        placeholder="Quantité"
-                        value={quantity}
-                        onChange={(e) => setQuantity(e.target.value)}
-                    />
-
-                    {/* Bouton de validation */}
-                    <Button
-                        colorScheme="purple"
-                        onClick={addConsumable}
-                        isLoading={loading}
-                        isDisabled={!selectedConsumable || !quantity || Number(quantity) <= 0}
-                    >
-                        Ajouter
-                    </Button>
-                </HStack>
+                        {/* Bouton de validation */}
+                        <Button
+                            colorScheme="purple"
+                            onClick={addConsumable}
+                            isLoading={loading}
+                            isDisabled={!selectedConsumable || !quantity || Number(quantity) <= 0}
+                        >
+                            Ajouter
+                        </Button>
+                    </HStack>
+                )}
 
                 {/* TABLEAU DES LIAISONS */}
                 <Box borderWidth="1px" borderRadius="lg" overflow="hidden" position="relative">
@@ -260,7 +276,7 @@ export default function TicketConsumablesTab({
                                 <Th py={3}>Pièce</Th>
                                 <Th py={3}>Quantité</Th>
                                 <Th py={3}>Unité</Th>
-                                <Th py={3} textAlign="right">Actions</Th>
+                                {!isClosed && <Th py={3} textAlign="right">Actions</Th>}
                             </Tr>
                         </Thead>
 
@@ -273,21 +289,25 @@ export default function TicketConsumablesTab({
                                             {c.quantity_used}
                                         </Td>
                                         <Td py={3}>{c.consumable_unit || '-'}</Td>
-                                        <Td py={3} textAlign="right">
-                                            <Button
-                                                size="xs"
-                                                colorScheme="red"
-                                                variant="ghost"
-                                                onClick={() => removeConsumable(c.id)}
-                                            >
-                                                Retirer
-                                            </Button>
-                                        </Td>
+
+                                        {/* Masquer le bouton de suppression si clôturé */}
+                                        {!isClosed && (
+                                            <Td py={3} textAlign="right">
+                                                <Button
+                                                    size="xs"
+                                                    colorScheme="red"
+                                                    variant="ghost"
+                                                    onClick={() => removeConsumable(c.id)}
+                                                >
+                                                    Retirer
+                                                </Button>
+                                            </Td>
+                                        )}
                                     </Tr>
                                 ))
                             ) : (
                                 <Tr>
-                                    <Td colSpan={4} py={6} textAlign="center">
+                                    <Td colSpan={isClosed ? 3 : 4} py={6} textAlign="center">
                                         <Text fontSize="sm" color="gray.500">
                                             Aucun consommable enregistré sur ce ticket.
                                         </Text>
@@ -299,7 +319,6 @@ export default function TicketConsumablesTab({
                 </Box>
             </VStack>
 
-            {/* Fermer la liste flottante si on clique en dehors */}
             {showDropdown && <Box position="fixed" top={0} bottom={0} left={0} right={0} zIndex={5} onClick={() => setShowDropdown(false)} />}
         </Box>
     );

@@ -103,9 +103,11 @@ const WORKFLOW: Record<TicketStatus, Partial<Record<TicketAction, boolean>>> = {
     completed: {
         close: true,
         duplicate: true,
+        delete: true,
     },
     closed: {
         duplicate: true,
+        delete: true,
     },
 };
 
@@ -183,6 +185,7 @@ export default function TicketHeader({
 
     const handleStart = () => requestAction('start');
 
+    //const handleComplete = () => requestAction('complete');
     const handleComplete = () =>
         requestAction('complete', {
             result: 'ok',
@@ -369,17 +372,7 @@ export default function TicketHeader({
                             Supprimer
                         </Button>
                     )}
-                    {can(ticket.status, 'close') && (
-                        <Button
-                            size="sm"
-                            colorScheme="red"
-                            variant="outline"
-                            onClick={handleClose}
-                            isDisabled={loading || isDownloadingPdf || isGeneratingQr}
-                        >
-                            Valider
-                        </Button>
-                    )}
+
 
                     {/* STATE MACHINE ACTIONS */}
                     {actions.map(a => (
